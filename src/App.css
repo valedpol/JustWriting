@@ -1,0 +1,284 @@
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #111;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 2fr) 1fr;
+  align-items: center;
+  min-height: 72px;
+  padding: 0 24px;
+  background: #fff;
+  border: none;
+}
+
+.brand-block {
+  font-family: "Apple SD Gothic Neo", sans-serif;
+  font-style: italic;
+  font-synthesis: style;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: #111;
+  letter-spacing: -0.03em;
+}
+
+.meta-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: #4b4b4b;
+  text-align: center;
+}
+
+.meta-user {
+  font-weight: 600;
+  color: #111;
+}
+
+.meta-divider {
+  color: #8a8a8a;
+}
+
+.meta-timer {
+  color: #111;
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-actions {
+  justify-self: end;
+  width: 120px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.screen-mode-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #111;
+  cursor: pointer;
+}
+
+.screen-mode-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-width: 1.25;
+}
+
+.main-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(170px, 0.75fr) minmax(420px, 2.25fr) minmax(170px, 0.75fr);
+  min-height: 0;
+}
+
+.left-sidebar,
+.right-sidebar {
+  padding: 24px 18px 20px;
+  background: #fff;
+  border: none;
+}
+
+.left-sidebar {
+  padding-top: 0;
+}
+
+.quote-box {
+  margin-top: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.quote-box p {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #262626;
+  font-style: italic;
+}
+
+.side-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 44px;
+}
+
+.menu-item {
+  width: 100%;
+  padding: 10px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #2f2f2f;
+  text-align: left;
+  font-size: 0.96rem;
+  cursor: default;
+}
+
+.menu-item.is-active {
+  background: transparent;
+  border: none;
+}
+
+.editor-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px 24px 14px;
+}
+
+.editor-shell {
+  position: relative;
+  flex: 1;
+  border: 1px solid #d9d9d9;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+.selection-toolbar {
+  position: fixed;
+  transform: translate(-50%, calc(-100% - 8px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  z-index: 2;
+}
+
+.selection-toolbar button {
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  color: #3c3c3c;
+  padding: 5px 8px;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.selection-toolbar button.danger {
+  color: #7d3d32;
+}
+
+.editor-shell textarea {
+  width: 100%;
+  min-height: 620px;
+  border: none;
+  resize: none;
+  background: transparent;
+  color: #171717;
+  font: 400 1rem/1.7 'Georgia', 'Times New Roman', serif;
+  padding: 28px 28px 20px;
+  outline: none;
+}
+
+.editor-shell textarea::placeholder {
+  color: #9b9b9b;
+}
+
+.bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 0 20px;
+  background: #fff;
+  border: none;
+  color: #3d3d3d;
+  font-size: 0.82rem;
+}
+
+.footer-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  text-align: center;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.footer-status-text {
+  font-weight: 400;
+  color: #3d3d3d;
+}
+
+.app-shell.screen-writing-standard .left-sidebar,
+.app-shell.screen-writing-standard .right-sidebar,
+.app-shell.screen-writing-wide .meta-block,
+.app-shell.screen-writing-wide .left-sidebar,
+.app-shell.screen-writing-wide .right-sidebar {
+  display: none;
+}
+
+.app-shell.screen-writing-standard .editor-column {
+  grid-column: 2;
+}
+
+.app-shell.screen-writing-wide .topbar {
+  grid-template-columns: 1fr auto;
+  min-height: 52px;
+}
+
+.app-shell.screen-writing-wide .topbar-actions {
+  width: auto;
+}
+
+.app-shell.screen-writing-wide .main-layout {
+  grid-template-columns: 1fr;
+}
+
+.app-shell.screen-writing-wide .editor-column {
+  padding: 0 18px 12px;
+}
+
+.app-shell.screen-writing-wide .editor-shell {
+  min-height: calc(100vh - 160px);
+}
+
+.app-shell.screen-writing-wide .editor-shell textarea {
+  min-height: calc(100vh - 180px);
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 14px 18px;
+  }
+
+  .meta-block {
+    flex-wrap: wrap;
+  }
+
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .bottom-bar {
+    padding: 12px 16px;
+  }
+
+  .footer-center {
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+}
