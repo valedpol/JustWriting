@@ -46,6 +46,12 @@
   font-size: 0.78em;
 }
 
+.backlog-signature {
+  margin: 4.5rem 0 0 2.7rem;
+  font: 400 0.9rem / 1.4 Georgia, 'Times New Roman', serif;
+  color: #777;
+}
+
 @media (max-width: 560px) {
   .backlog-content {
     width: min(100% - 36px, 760px);

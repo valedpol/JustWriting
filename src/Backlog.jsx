@@ -22,6 +22,7 @@ function Backlog() {
             <li key={`${index}-${task}`}>{task}</li>
           ))}
         </ol>
+        <p className="backlog-signature">© Samsara Art Department (SAD)</p>
       </div>
     </main>
   )
