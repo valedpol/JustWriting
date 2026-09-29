@@ -1,0 +1,34 @@
+.app-shell.settings-page { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+.settings-page .topbar, .settings-page .bottom-bar { flex-shrink: 0; }
+.settings-page .main-layout { overflow: hidden; }
+.settings-page .editor-column { min-height: 0; min-width: 0; }
+.settings-content { flex: 1; min-height: 0; overflow-y: auto; padding: 28px; color: #262626; scrollbar-width: none; }
+.settings-content::-webkit-scrollbar { display: none; }
+.settings-content h1 { position: relative; padding-bottom: 16px; border-bottom: 1px solid transparent; margin: 0 0 12px; font: 400 24px/1.4 Georgia, 'Times New Roman', serif; }
+.settings-content h1::after { content: ''; position: absolute; left: 0; bottom: -1px; width: min(100%, max(135px, calc(40% - 9.6px))); border-bottom: 1px solid #d9d9d9; }
+.settings-content h2 { margin: 0 0 22px; font: 400 20px/1.55 Georgia, 'Times New Roman', serif; }
+.settings-content section { margin-top: 44px; }
+.settings-note { color: #777; font-size: 0.82rem; font-weight: 400; }
+.settings-content p { margin: 0 0 18px; }
+.settings-row { display: grid; grid-template-columns: minmax(135px, 0.8fr) minmax(0, 1.2fr); gap: 24px; align-items: baseline; margin-bottom: 18px; font-size: 0.9rem; }
+.settings-content input, .settings-content select { box-sizing: border-box; min-width: 0; width: 100%; border: 0; border-bottom: 1px solid #d9d9d9; border-radius: 0; padding: 5px 0; background: transparent; color: #262626; font: inherit; }
+.settings-content input::placeholder { color: #9b9b9b; }
+.settings-content button { justify-self: start; border: 0; padding: 0; background: transparent; color: #4b4b4b; font: inherit; font-size: 0.82rem; cursor: pointer; }
+.settings-content :is(button, input, select):focus-visible { outline: 1px solid #777; outline-offset: 4px; }
+.settings-link-value { display: flex; gap: 18px; align-items: baseline; min-width: 0; }
+.settings-resource { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 18px; align-items: end; margin-bottom: 24px; font-size: 0.85rem; }
+.settings-resource label { display: grid; gap: 8px; }
+@media (max-width: 600px) {
+  .settings-row, .settings-resource { grid-template-columns: 1fr; gap: 10px; }
+}
+
+.settings-note.settings-error { color: #a32929; }
+
+.settings-time-field { min-width: 0; }
+.settings-time-field .settings-field-note { margin: 8px 0 0; }
+
+.settings-timezone { position: relative; min-width: 0; }
+.settings-timezone-options { position: absolute; top: 100%; left: 0; right: 0; z-index: 2; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid #d9d9d9; }
+.settings-timezone-options > div { padding: 8px 10px; cursor: pointer; }
+.settings-timezone-options .is-highlighted { background: #f4f4f4; }
+.settings-timezone-options small { display: block; margin-top: 3px; color: #777; }

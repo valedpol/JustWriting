@@ -1,34 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import './App.css'
-
-const DRAFT_STORAGE_KEY = 'just-writing-draft'
-const HISTORY_STORAGE_KEY = 'just-writing-history'
-const SCREEN_MODES = {
-  interface: 'interface',
-  standard: 'writing-standard',
-  wide: 'writing-wide',
-}
-
-function getWordCount(value) {
-  if (!value || !value.trim()) {
-    return 0
-  }
-
-  return value
-    .replace(/\*\*|__|\*|_|<u>|<\/u>|[-#•*]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean).length
-}
-
-function getDayKey(date) {
-  const localDate = new Date(date)
-  const year = localDate.getFullYear()
-  const month = String(localDate.getMonth() + 1).padStart(2, '0')
-  const day = String(localDate.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
+import { useTodayText } from './hooks/useTodayText'
+import { getWordCount } from './domain/wordCount'
+import MyTexts from './MyTexts'
+import Settings from './Settings'
+import WordCounter from './components/WordCounter'
+import { useWorkspaceScroll } from './hooks/useWorkspaceScroll'
+import { SCREEN_MODES, initialScreen, editorScreenReducer } from './domain/editorScreen'
 
 function formatLongDate(date) {
   const formatter = new Intl.DateTimeFormat('ru-RU', {
@@ -50,35 +28,30 @@ function formatCountdown(ms) {
   return `${hours}:${minutes}:${seconds}`
 }
 
-function loadDraft() {
-  try {
-    return window.localStorage.getItem(DRAFT_STORAGE_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function loadHistory() {
-  try {
-    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY)
-    if (!raw) {
-      return {}
-    }
-
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
 function App() {
-  const [text, setText] = useState(() => loadDraft())
-  const [screenMode, setScreenMode] = useState(SCREEN_MODES.interface)
-  const [isSaving, setIsSaving] = useState(false)
+  const { text, setText, status, error, userId, ready, flush, localProfile, updateSetting, dayEndsAt, graceUntil, endWriting, beginComposition, finishComposition } = useTodayText()
+  const authorName = localProfile?.displayName ?? 'Pol Valery'
+  const [{ section, screenMode }, dispatchScreen] = useReducer(editorScreenReducer, initialScreen)
+  const isToday = section === 'today'
+  const [archiveWords, setArchiveWords] = useState(null)
+  const [archiveMetadataHost, setArchiveMetadataHost] = useState(null)
+  const [settingsStatusHost, setSettingsStatusHost] = useState(null)
+  const setScreenMode = (mode) => {
+    if (mode === SCREEN_MODES.interface) endWriting()
+    dispatchScreen({ type: 'mode', mode })
+  }
+  const openSection = (nextSection) => {
+    endWriting()
+    if (nextSection === 'archive' && section !== 'archive') setArchiveWords(null)
+    dispatchScreen({ type: 'section', section: nextSection })
+    setSelectionToolbar({ visible: false, x: 0, y: 0 })
+  }
   const [now, setNow] = useState(new Date())
   const [selectionToolbar, setSelectionToolbar] = useState({ visible: false, x: 0, y: 0 })
+  const workspaceRef = useRef(null)
+  useWorkspaceScroll(workspaceRef, section)
   const textareaRef = useRef(null)
+  const compositionCommit = useRef(null)
   const toolbarRef = useRef(null)
 
   useEffect(() => {
@@ -89,31 +62,11 @@ function App() {
     return () => window.clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    const saveTimer = window.setTimeout(() => {
-      const nextHistory = loadHistory()
-      nextHistory[getDayKey(new Date())] = text
-
-      try {
-        window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(nextHistory))
-        window.localStorage.setItem(DRAFT_STORAGE_KEY, text)
-      } catch {
-        // Ignore local storage failures in the TEST version.
-      }
-
-      setIsSaving(false)
-    }, 250)
-
-    return () => window.clearTimeout(saveTimer)
-  }, [text])
-
   const currentDayWords = useMemo(() => getWordCount(text), [text])
 
   const countdown = useMemo(() => {
-    const nextMidnight = new Date(now)
-    nextMidnight.setHours(24, 0, 0, 0)
-    return formatCountdown(nextMidnight.getTime() - now.getTime())
-  }, [now])
+    return formatCountdown(dayEndsAt === null ? 0 : (graceUntil ?? dayEndsAt) - now.getTime())
+  }, [now, dayEndsAt, graceUntil])
 
   const getSelectionPosition = (textarea, selectionStart) => {
     const computedStyle = window.getComputedStyle(textarea)
@@ -162,7 +115,7 @@ function App() {
     }
 
     const hasSelection = textarea.selectionStart !== textarea.selectionEnd
-    const isWritingScreen = screenMode !== SCREEN_MODES.interface
+    const isWritingScreen = isToday && screenMode !== SCREEN_MODES.interface
 
     if (!hasSelection || !isWritingScreen) {
       setSelectionToolbar({ visible: false, x: 0, y: 0 })
@@ -174,19 +127,22 @@ function App() {
   }
 
   const handleTextChange = (event) => {
-    setIsSaving(true)
+    if (!isToday || !ready) return
+    if (compositionCommit.current === event.target.value) { compositionCommit.current = null; return }
+    compositionCommit.current = null
     setText(event.target.value)
     updateSelectionToolbar()
   }
 
   const handleTextareaClick = () => {
+    if (!isToday || !ready) return
     if (screenMode === SCREEN_MODES.interface) {
       setScreenMode(SCREEN_MODES.standard)
     }
   }
 
   const handleTextareaKeyDown = (event) => {
-    if (screenMode !== SCREEN_MODES.interface || event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) {
+    if (!isToday || !ready || screenMode !== SCREEN_MODES.interface || event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) {
       return
     }
 
@@ -197,7 +153,6 @@ function App() {
     const nextText = `${text.slice(0, start)}${event.key}${text.slice(end)}`
 
     setText(nextText)
-    setIsSaving(true)
     setScreenMode(SCREEN_MODES.standard)
 
     window.requestAnimationFrame(() => {
@@ -213,6 +168,7 @@ function App() {
   }
 
   const setWritingScreenMode = (nextMode) => {
+    if (!isToday || !ready) return
     setScreenMode(nextMode)
 
     window.requestAnimationFrame(() => {
@@ -222,7 +178,7 @@ function App() {
   }
 
   const handleAppClick = (event) => {
-    if (screenMode === SCREEN_MODES.interface || textareaRef.current?.contains(event.target) || toolbarRef.current?.contains(event.target)) {
+    if (!isToday || screenMode === SCREEN_MODES.interface || textareaRef.current?.contains(event.target) || toolbarRef.current?.contains(event.target)) {
       return
     }
 
@@ -231,6 +187,7 @@ function App() {
   }
 
   const applyFormat = (prefix, suffix = prefix) => {
+    if (!isToday || !ready) return
     const textarea = textareaRef.current
 
     if (!textarea) {
@@ -255,77 +212,123 @@ function App() {
   }
 
   const handleResetText = () => {
+    if (!isToday || !ready) return
     const confirmed = window.confirm('Сбросить текущий текст? Это действие нельзя будет отменить.')
 
     if (!confirmed) {
       return
     }
 
-    setText('')
+    setText('', screenMode !== SCREEN_MODES.interface)
 
-    try {
-      const nextHistory = loadHistory()
-      nextHistory[getDayKey(new Date())] = ''
-      window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(nextHistory))
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, '')
-    } catch {
-      // Ignore local storage failures in the TEST version.
-    }
+
   }
 
-  const toolbarVisible = selectionToolbar.visible && screenMode !== SCREEN_MODES.interface
+  const toolbarVisible = isToday && selectionToolbar.visible && screenMode !== SCREEN_MODES.interface
 
   return (
-    <div className={`app-shell screen-${screenMode}`} onClick={handleAppClick}>
+    <div className={`app-shell screen-${screenMode}${section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
       <header className="topbar">
         <div className="brand-block">Just Writing</div>
 
         <div className="meta-block">
-          <span className="meta-user">Автор</span>
-          <span className="meta-divider">•</span>
-          <span>{formatLongDate(now)}</span>
-          <span className="meta-divider">•</span>
-          <span className="meta-timer">{countdown}</span>
+          {screenMode === SCREEN_MODES.interface ? (
+            <>
+              <div className="meta-identity">
+                <span className="meta-user">{authorName}</span>
+                <span className="meta-divider">·</span>
+                <span>{formatLongDate(now)}</span>
+              </div>
+              <div className="meta-countdown">
+                <span className="meta-countdown-label">осталось</span>
+                <span className="meta-timer">{countdown}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <span className="meta-user">{authorName}</span>
+              <span className="meta-divider">·</span>
+              <span className="meta-countdown-label">осталось</span>
+              <span className="meta-timer">{countdown}</span>
+            </>
+          )}
         </div>
 
+        {graceUntil && isToday ? <div className="grace-alarm" role="status">
+          <strong>ALARM!</strong> Начался новый день. Текст остаётся в предыдущем дне.
+          <span> До закрытия {countdown}</span>
+        </div> : null}
+
         <div className="topbar-actions">
-          {screenMode === SCREEN_MODES.standard ? (
-            <button
-              type="button"
-              className="screen-mode-button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={(event) => {
-                event.stopPropagation()
-                setWritingScreenMode(SCREEN_MODES.wide)
-              }}
-              aria-label="Перейти в широкий режим"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M9 3H3v6M3 3l7 7M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7M15 21h6v-6M21 21l-7-7" />
-              </svg>
-            </button>
-          ) : null}
-          {screenMode === SCREEN_MODES.wide ? (
-            <button
-              type="button"
-              className="screen-mode-button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={(event) => {
-                event.stopPropagation()
-                setWritingScreenMode(SCREEN_MODES.standard)
-              }}
-              aria-label="Перейти в стандартный режим"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M3 9h6V3M9 9 3 3M21 9h-6V3M15 9l6-6M3 15h6v6M9 15l-6 6M21 15h-6v6M15 15l6 6" />
-              </svg>
-            </button>
-          ) : null}
+          <div className="writing-tools">
+            {screenMode !== SCREEN_MODES.interface ? (
+              <button
+                type="button"
+                className="screen-mode-button search-button"
+                aria-label="Поиск (скоро)"
+                aria-disabled="true"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="10.5" cy="10.5" r="6.5" />
+                  <path d="m15.5 15.5 5 5" />
+                </svg>
+              </button>
+            ) : null}
+            {screenMode !== SCREEN_MODES.interface ? (
+              <button
+                type="button"
+                className="screen-mode-button"
+                aria-label="Таймер (скоро)"
+                aria-disabled="true"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="14" r="7" />
+                  <path d="M10 3h4M12 3v4M17 8l2-2M12 10v4l2 2" />
+                </svg>
+              </button>
+            ) : null}
+            {screenMode === SCREEN_MODES.standard ? (
+              <button
+                type="button"
+                className="screen-mode-button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setWritingScreenMode(SCREEN_MODES.wide)
+                }}
+                aria-label="Перейти в широкий режим"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 3H3v6M3 3l7 7M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7M15 21h6v-6M21 21l-7-7" />
+                </svg>
+              </button>
+            ) : null}
+            {screenMode === SCREEN_MODES.wide ? (
+              <button
+                type="button"
+                className="screen-mode-button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setWritingScreenMode(SCREEN_MODES.standard)
+                }}
+                aria-label="Перейти в стандартный режим"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 9h6V3M9 9 3 3M21 9h-6V3M15 9l6-6M3 15h6v6M9 15l-6 6M21 15h-6v6M15 15l6 6" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
         </div>
       </header>
 
-      <main className="main-layout">
-        <aside className="left-sidebar" aria-hidden="true">
+      <main className="main-layout" ref={workspaceRef}>
+        <aside className="left-sidebar">
           <div className="quote-box">
             <p>
               Писать проще, когда вокруг тишина и достаточно времени, чтобы
@@ -334,11 +337,11 @@ function App() {
           </div>
 
           <nav className="side-menu" aria-label="Главное меню">
-            <button type="button" className="menu-item is-active">
-              Личный кабинет
+            <button type="button" className={`menu-item${section === 'archive' ? ' is-active' : ''}`} aria-current={section === 'archive' ? 'page' : undefined} onClick={() => openSection('archive')}>
+              Мои тексты
             </button>
-            <button type="button" className="menu-item">
-              Работа с текстами
+            <button type="button" className={`menu-item${section === 'today' ? ' is-active' : ''}`} aria-current={section === 'today' ? 'page' : undefined} onClick={() => openSection('today')}>
+              Текст сегодня
             </button>
             <button type="button" className="menu-item">
               Общая страница
@@ -349,14 +352,14 @@ function App() {
             <button type="button" className="menu-item">
               Исследования
             </button>
-            <button type="button" className="menu-item">
+            <button type="button" className={`menu-item${section === 'settings' ? ' is-active' : ''}`} aria-current={section === 'settings' ? 'page' : undefined} onClick={() => openSection('settings')}>
               Настройки
             </button>
           </nav>
         </aside>
 
         <section className="editor-column">
-          <div className="editor-shell">
+          {section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost} /> : section === 'archive' ? <MyTexts userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} /> : <div className="editor-shell">
             {toolbarVisible ? (
               <div
                 ref={toolbarRef}
@@ -392,26 +395,39 @@ function App() {
               ref={textareaRef}
               value={text}
               onChange={handleTextChange}
+              onCompositionStart={() => { compositionCommit.current = null; beginComposition() }}
+              onCompositionEnd={(event) => { compositionCommit.current = event.currentTarget.value; finishComposition(event.currentTarget.value) }}
               onSelect={updateSelectionToolbar}
               onClick={handleTextareaClick}
               onKeyDown={handleTextareaKeyDown}
               onBlur={handleTextareaBlur}
-              readOnly={screenMode === SCREEN_MODES.interface}
+              onScroll={() => setSelectionToolbar({ visible: false, x: 0, y: 0 })}
+              readOnly={!ready || screenMode === SCREEN_MODES.interface}
+              disabled={!ready}
               aria-label="Текстовый редактор"
               placeholder="Пиши просто. Просто пиши."
             />
-          </div>
+          </div>}
         </section>
 
-        <aside className="right-sidebar" aria-hidden="true" />
+        <aside className="right-sidebar" ref={setArchiveMetadataHost} aria-hidden={isToday ? true : undefined} />
       </main>
 
       <footer className="bottom-bar">
         <div className="footer-center">
-          <span>{currentDayWords} слов</span>
-          <span className="footer-status-text">{isSaving ? 'Сохраняю' : 'Сохранено'}</span>
+          {isToday ? <>
+            <WordCounter count={currentDayWords} goal={localProfile?.dailyWordGoal} />
+          <span className="footer-status-text" role="status" title={error || 'Локальное хранение на этом устройстве'}>{status === 'loading' ? 'Загружаю' : status === 'saving' ? 'Сохраняю' : status === 'error' || status === 'load-error' ? 'Ошибка сохранения' : status === 'saved' ? 'Сохранено' : ''}</span>
+          </> : section === 'archive' ? <>
+            <span className="footer-status-text">Написано</span>
+            <span>{archiveWords ?? '…'} слов</span>
+          </> : <span ref={setSettingsStatusHost} />}
         </div>
       </footer>
+      {error ? <p className="storage-error" role="alert">
+        {error}
+        {status === 'error' ? <> <button type="button" onClick={() => setText(text)}>Повторить сохранение</button></> : null}
+      </p> : null}
     </div>
   )
 }

@@ -55,6 +55,8 @@
   width: 120px;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
 }
 
 .screen-mode-button {
@@ -153,6 +155,118 @@
   box-shadow: none;
 }
 
+.app-shell.screen-interface .editor-shell {
+  display: flex;
+}
+
+/* Quiet marginal notes belong only to the interface screen. */
+.screen-interface {
+  --left-composition-inset: clamp(32px, 3.3vw, 48px);
+}
+
+.screen-interface .topbar {
+  grid-template-columns: minmax(170px, 0.75fr) minmax(420px, 2.25fr) minmax(170px, 0.75fr);
+  padding-inline: 0;
+}
+
+.screen-interface .brand-block {
+  margin-left: var(--left-composition-inset);
+  font-size: 1.56rem;
+}
+
+.screen-interface .left-sidebar {
+  padding-left: calc(var(--left-composition-inset) - 6px);
+}
+
+.screen-interface .meta-block {
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  justify-self: center;
+  gap: 4px 10px;
+  margin-left: 0;
+  text-align: left;
+}
+
+.screen-interface .meta-identity {
+  display: contents;
+}
+
+.screen-interface .meta-countdown {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.screen-interface .meta-countdown {
+  /* Only the identity row determines the width of the centered block. */
+  grid-column: 3;
+  width: 0;
+  min-width: 100%;
+  flex-wrap: nowrap;
+  margin-left: 0;
+  font-size: 0.78rem;
+}
+
+.screen-interface .meta-countdown-label {
+  color: #777;
+}
+
+.screen-interface .meta-countdown .meta-timer {
+  color: #4b4b4b;
+  font-weight: 400;
+}
+
+.screen-interface .quote-box {
+  max-width: 190px;
+  margin-left: 22px;
+  transform: translate(14px, -8px);
+}
+
+.screen-interface .quote-box p {
+  font: italic 400 0.94rem/1.65 Georgia, 'Times New Roman', serif;
+  color: #777;
+}
+
+.screen-interface .side-menu {
+  --navigation-item-gap: 8px;
+  --navigation-group-gap: 26px;
+  margin-top: 88px;
+  gap: var(--navigation-item-gap);
+  padding-left: 6px;
+}
+
+.screen-interface .menu-item {
+  position: relative;
+  width: auto;
+  align-self: flex-start;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: #4b4b4b;
+}
+
+.screen-interface .menu-item.is-active {
+  margin-left: 34px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.screen-interface .menu-item.is-active::before {
+  content: '';
+  position: absolute;
+  top: 0.75em;
+  left: -34px;
+  width: 10px;
+  border-top: 1px solid currentColor;
+}
+
+.screen-interface .menu-item:nth-child(4),
+.screen-interface .menu-item:nth-child(6) {
+  margin-top: calc(var(--navigation-group-gap) - var(--navigation-item-gap));
+}
+
 .selection-toolbar {
   position: fixed;
   transform: translate(-50%, calc(-100% - 8px));
@@ -185,9 +299,14 @@
   resize: none;
   background: transparent;
   color: #171717;
-  font: 400 1rem/1.7 'Georgia', 'Times New Roman', serif;
+  font: 400 20px/1.55 'Georgia', 'Times New Roman', serif;
   padding: 28px 28px 20px;
   outline: none;
+  scrollbar-width: none;
+}
+
+.editor-shell textarea::-webkit-scrollbar {
+  display: none;
 }
 
 .editor-shell textarea::placeholder {
@@ -238,8 +357,28 @@
   min-height: 52px;
 }
 
-.app-shell.screen-writing-wide .topbar-actions {
-  width: auto;
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .topbar-actions {
+  /* Preserve the existing space in the topbar, including its mobile row. */
+  height: 28px;
+}
+
+.writing-tools {
+  position: fixed;
+  top: 22px;
+  right: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  gap: 18px;
+  z-index: 1;
+}
+
+.app-shell.screen-writing-wide .search-button {
+  visibility: hidden;
+}
+
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .brand-block {
+  align-self: start;
+  margin-top: calc((72px - 1.5em) / 2);
 }
 
 .app-shell.screen-writing-wide .main-layout {
@@ -250,15 +389,17 @@
   padding: 0 18px 12px;
 }
 
-.app-shell.screen-writing-wide .editor-shell {
-  min-height: calc(100vh - 160px);
-}
-
-.app-shell.screen-writing-wide .editor-shell textarea {
-  min-height: calc(100vh - 180px);
-}
-
 @media (max-width: 900px) {
+  .screen-interface .topbar {
+    grid-template-columns: 1fr;
+    padding-inline: 0;
+  }
+
+  .writing-tools {
+    top: 14px;
+    right: 18px;
+  }
+
   .topbar {
     grid-template-columns: 1fr;
     gap: 10px;
@@ -267,6 +408,10 @@
 
   .meta-block {
     flex-wrap: wrap;
+  }
+
+  .app-shell:is(.screen-writing-standard, .screen-writing-wide) .brand-block {
+    margin-top: 0;
   }
 
   .main-layout {
@@ -282,3 +427,65 @@
     flex-wrap: wrap;
   }
 }
+
+/* Верхняя буферная зона остаётся на месте при прокрутке текста.
+   Текст полностью исчезает ниже интерфейса, внутри белого пространства. */
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) {
+  --text-buffer-clear: 24px;
+  --text-buffer-end: 40px;
+  /* Match interface: column inset + container border + textarea inset. */
+  --writing-text-inset: calc(18px + 1px + 28px);
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.screen-writing-wide {
+  /* The wide topbar is 20px shorter than the interface topbar. */
+  --writing-text-inset: calc(18px + 1px + 28px + 72px - 52px);
+}
+
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .topbar,
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .bottom-bar {
+  flex-shrink: 0;
+}
+
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .editor-column {
+  min-height: 0;
+  min-width: 0;
+  padding-top: 0;
+}
+
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .editor-shell {
+  display: flex;
+  min-height: 0;
+  border: none;
+}
+
+.app-shell.screen-writing-standard .editor-shell {
+  /* Preserve the interface content width and text origin without a visible frame. */
+  border-inline: 1px solid transparent;
+}
+
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .editor-shell textarea {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  padding-top: var(--writing-text-inset);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-mask-image: linear-gradient(to bottom, transparent var(--text-buffer-clear), #000 var(--text-buffer-end));
+  mask-image: linear-gradient(to bottom, transparent var(--text-buffer-clear), #000 var(--text-buffer-end));
+}
+
+@media (max-width: 900px) {
+  .app-shell.screen-writing-standard .editor-column {
+    grid-column: 1;
+  }
+}
+
+.word-counter-goal-pending { opacity: 0.5; font-weight: 400; }
+.screen-writing-standard .word-counter { font-weight: 700; }
+
+.grace-alarm { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 80vw; font-size: 12px; color: #a32929; text-align: center; }

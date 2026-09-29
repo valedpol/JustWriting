@@ -1,0 +1,37 @@
+.my-texts { flex: 1; padding: 28px; color: #171717; }
+.my-texts ul { list-style: none; padding: 0; margin: 0; }
+.my-texts li { position: relative; }
+.my-texts li + li { margin-top: 63px; }
+.my-texts li + li::before { content: ''; position: absolute; top: -32px; left: 0; right: 0; border-top: 1px solid #d9d9d9; pointer-events: none; user-select: none; }
+.my-texts button { border: none; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; }
+.my-texts button:focus-visible { outline: 1px solid #777; outline-offset: 5px; }
+.text-preview { display: block; margin-top: 8px; font: 400 16px/1.55 Georgia, 'Times New Roman', serif; color: #777; overflow-wrap: anywhere; }
+.saved-text { white-space: pre-wrap; overflow-wrap: anywhere; font: 400 20px/1.55 Georgia, 'Times New Roman', serif; }
+.storage-error { margin: 0; padding: 8px 24px; text-align: center; font-size: 0.82rem; }
+
+/* Archive alone owns a bounded scrolling region; the surrounding UI stays put. */
+.app-shell.archive-page { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+.archive-page .topbar, .archive-page .bottom-bar { flex-shrink: 0; }
+.archive-page .main-layout { overflow: hidden; }
+.archive-page .editor-column { min-height: 0; min-width: 0; }
+.archive-page .my-texts { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.archive-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.archive-scroll::-webkit-scrollbar { display: none; }
+/* Enough breathing room to position even the first/last date one third down. */
+.my-texts .archive-scroll ul { padding-block: calc(var(--archive-height, 0px) / 3) calc(var(--archive-height, 0px) * 2 / 3); }
+
+/* In reading mode preceding entries provide context, not artificial top space. */
+.my-texts .archive-scroll.is-reading ul { padding-top: 0; }
+.archive-scroll .saved-text, .archive-scroll .text-preview { margin-top: 0; }
+
+.archive-page .right-sidebar { position: relative; }
+.archive-day-metadata { position: absolute; left: 18px; right: 18px; overflow: hidden; }
+.archive-day-label { position: absolute; left: 0; border: 0; padding: 0; background: transparent; color: #777; font: inherit; font-size: 0.85rem; text-align: left; cursor: pointer; }
+.archive-day-label span { display: block; white-space: nowrap; }
+.archive-day-label:focus-visible { outline: 1px solid #777; outline-offset: 5px; }
+@media (max-width: 900px) {
+  .archive-page .main-layout { grid-template-columns: minmax(0, 1fr) 130px; }
+  .archive-page .left-sidebar { grid-column: 1 / -1; }
+  .archive-page .right-sidebar { grid-column: 2; grid-row: 2; }
+  .archive-page .editor-column { grid-column: 1; grid-row: 2; }
+}
