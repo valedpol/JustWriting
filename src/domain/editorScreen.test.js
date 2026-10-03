@@ -23,3 +23,20 @@ test('returning to today requires explicit navigation and starts in interface', 
   assert.equal(wide.screenMode, modes.wide)
   assert.deepEqual(reduce(wide, { type: 'mode', mode: modes.interface }), initialScreen)
 })
+
+test('Research opens in interface, rejects writing and exits explicitly to today', () => {
+  const research = reduce({ section: 'today', screenMode: modes.wide }, { type: 'section', section: 'research' })
+  assert.deepEqual(research, { section: 'research', screenMode: modes.interface })
+  assert.equal(reduce(research, { type: 'mode', mode: modes.standard }), research)
+  assert.deepEqual(reduce(research, { type: 'section', section: 'today' }), initialScreen)
+})
+
+test('timer shortcut composes existing section and mode transitions from every interface page', () => {
+  for (const section of ['research', 'settings', 'archive', 'today']) {
+    const before = { section, screenMode: modes.interface }
+    const today = section === 'today' ? before : reduce(before, { type: 'section', section: 'today' })
+    const writing = reduce(today, { type: 'mode', mode: modes.standard })
+    assert.deepEqual(writing, { section: 'today', screenMode: modes.standard })
+    assert.deepEqual(before, { section, screenMode: modes.interface })
+  }
+})

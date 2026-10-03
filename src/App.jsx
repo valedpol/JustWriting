@@ -4,6 +4,8 @@ import { useTodayText } from './hooks/useTodayText'
 import { getWordCount } from './domain/wordCount'
 import MyTexts from './MyTexts'
 import Settings from './Settings'
+import Research from './Research'
+import ResearchNavigation from './components/ResearchNavigation'
 import WordCounter from './components/WordCounter'
 import WritingEditor from './components/WritingEditor.jsx'
 import { useWorkspaceScroll } from './hooks/useWorkspaceScroll'
@@ -83,7 +85,7 @@ function App() {
   }
 
   return (
-    <div className={`app-shell screen-${screenMode}${section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
+    <div className={`app-shell screen-${screenMode}${section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
       <header className="topbar">
         <div className="brand-block">Just Writing</div>
 
@@ -191,7 +193,7 @@ function App() {
             </p>
           </div>
 
-          <nav className="side-menu" aria-label="Главное меню">
+          {section === 'research' ? <ResearchNavigation onExit={() => openSection('today')} /> : <nav className="side-menu" aria-label="Главное меню">
             <button type="button" className={`menu-item${section === 'archive' ? ' is-active' : ''}`} aria-current={section === 'archive' ? 'page' : undefined} onClick={() => openSection('archive')}>
               Мои тексты
             </button>
@@ -204,13 +206,13 @@ function App() {
             <button type="button" className="menu-item">
               Проект студии
             </button>
-            <button type="button" className="menu-item">
+            <button type="button" className={`menu-item${section === 'research' ? ' is-active' : ''}`} aria-current={section === 'research' ? 'page' : undefined} onClick={() => openSection('research')}>
               Исследования
             </button>
             <button type="button" className={`menu-item${section === 'settings' ? ' is-active' : ''}`} aria-current={section === 'settings' ? 'page' : undefined} onClick={() => openSection('settings')}>
               Настройки
             </button>
-          </nav>
+          </nav>}
         </aside>
 
         <section className="editor-column">
@@ -219,7 +221,7 @@ function App() {
               writing={screenMode !== SCREEN_MODES.interface} metadataHost={archiveMetadataHost}
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
-          {section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost} /> : section === 'archive' ? <MyTexts userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} /> : null}
+          {section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost} /> : section === 'archive' ? <MyTexts userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} /> : null}
         </section>
 
         <aside className="right-sidebar" ref={setArchiveMetadataHost} />
