@@ -1,17 +1,27 @@
+import { maintenance } from '../runtime/maintenance.js'
 import { userDayFromText } from '../domain/userDay.js'
 
-export const DATABASE_VERSION = 3
+export const DATABASE_VERSION = 4
 let connection
 
 // Options allow migration tests against isolated databases and a fixed clock.
-export function connectDatabase({ name = 'just-writing', now = Date.now() } = {}) {
+export function connectDatabase(options = {}) {
+  return maintenance.applicationWrite(() => connectUnfenced(options))
+}
+
+function connectUnfenced({ name = 'just-writing', now = Date.now() } = {}) {
   return new Promise((resolve, reject) => {
     let migrationError
     let blocked = false
     const request = indexedDB.open(name, DATABASE_VERSION)
     request.onupgradeneeded = (event) => {
+      try { maintenance.assertSchemaWrite() } catch (error) { migrationError = error; request.transaction.abort(); return }
       const db = request.result
       const tx = request.transaction
+      if (event.oldVersion < 4) {
+        const samples = db.createObjectStore('wordCountSamples', { keyPath: 'sampleId' })
+        samples.createIndex('userDayTime', ['userDayId', 'timestamp'], { unique: true })
+      }
       if (event.oldVersion < 1) {
         db.createObjectStore('settings', { keyPath: 'key' })
         const texts = db.createObjectStore('texts', { keyPath: 'textId' })
@@ -85,20 +95,23 @@ export function openDatabase() {
 }
 
 // Resolve only after commit, never merely after an individual request succeeds.
-export async function transaction(storeNames, mode, run) {
-  const db = await openDatabase()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeNames, mode)
-    let result
-    let failure
-    tx.oncomplete = () => resolve(result)
-    tx.onabort = () => reject(failure || tx.error || new Error('Запись отменена'))
-    tx.onerror = () => { /* onabort reports failed transactions */ }
-    try {
-      run(tx, (value) => { result = value }, (error) => { failure = error; tx.abort() })
-    } catch (error) {
-      failure = error
-      tx.abort()
-    }
-  })
+export function transaction(storeNames, mode, run) {
+  const execute = async () => {
+    const db = await openDatabase()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeNames, mode)
+      let result
+      let failure
+      tx.oncomplete = () => resolve(result)
+      tx.onabort = () => reject(failure || tx.error || new Error('Запись отменена'))
+      tx.onerror = () => { /* onabort reports failed transactions */ }
+      try {
+        run(tx, (value) => { result = value }, (error) => { failure = error; tx.abort() })
+      } catch (error) {
+        failure = error
+        tx.abort()
+      }
+    })
+  }
+  return mode === 'readwrite' ? maintenance.applicationWrite(execute) : execute()
 }

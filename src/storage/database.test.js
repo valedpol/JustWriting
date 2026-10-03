@@ -36,7 +36,8 @@ function all(db, store) {
 
 test('fresh database creates empty userDays and texts', async () => {
   const db = await connectDatabase({ name: crypto.randomUUID(), now })
-  assert.equal(db.version, 3)
+  assert.equal(db.version, 4)
+  assert.deepEqual(await all(db, 'wordCountSamples'), [])
   assert.deepEqual(await all(db, 'texts'), [])
   assert.deepEqual(await all(db, 'userDays'), [])
   db.close()
@@ -115,4 +116,30 @@ test('v2 migration adds day goal fields, preserves first achievement and does no
   db = await connectDatabase({ name, now: now + 100 })
   assert.deepEqual(await all(db, 'userDays'), migrated)
   db.close()
+})
+
+test('v3 to v4 creates empty sample history and leaves existing data intact on migration and reload', async () => {
+  const name = crypto.randomUUID()
+  const originals = {
+    settings: { key: 'localProfile', userId: 'user', dailyWordGoal: 510 },
+    texts: { textId: 'text', userDayId: 'day', content: 'Старый текст', revision: 9 },
+    userDays: { userDayId: 'day', state: 'closed', dayKey: '2026-09-29', revision: 5 },
+  }
+  await new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 3)
+    request.onupgradeneeded = () => {
+      for (const [store, keyPath] of [['settings', 'key'], ['texts', 'textId'], ['userDays', 'userDayId']]) {
+        request.result.createObjectStore(store, { keyPath }).put(originals[store])
+      }
+    }
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => { request.result.close(); resolve() }
+  })
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const db = await connectDatabase({ name, now })
+    assert.equal(db.version, 4)
+    assert.deepEqual(await all(db, 'wordCountSamples'), [])
+    for (const store of Object.keys(originals)) assert.deepEqual(await all(db, store), [originals[store]])
+    db.close()
+  }
 })
