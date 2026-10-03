@@ -27,11 +27,38 @@
 .archive-page .right-sidebar { position: relative; }
 .archive-day-metadata { position: absolute; left: 18px; right: 18px; overflow: hidden; }
 .archive-day-label { position: absolute; left: 0; border: 0; padding: 0; background: transparent; color: #777; font: inherit; font-size: 0.85rem; text-align: left; cursor: pointer; }
-.archive-day-label span { display: block; white-space: nowrap; }
-.archive-day-label:focus-visible { outline: 1px solid #777; outline-offset: 5px; }
+.archive-day-label > button { display: flex; align-items: baseline; gap: 16px; }
+.archive-day-label > button > span { white-space: nowrap; }
+.archive-day-label button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.archive-day-label button:focus-visible { outline: 1px solid #777; outline-offset: 5px; }
+.archive-day-label { right: 0; cursor: default; }
+.archive-semantic-markup { overflow-wrap: anywhere; }
+.archive-semantic-titles { white-space: pre-wrap; }
+.archive-semantic-title { display: inline; }
+.archive-semantic-tags { white-space: normal; }
+.archive-semantic-markup .archive-semantic-kind { display: inline; white-space: normal; }
 @media (max-width: 900px) {
   .archive-page .main-layout { grid-template-columns: minmax(0, 1fr) 130px; }
   .archive-page .left-sidebar { grid-column: 1 / -1; }
   .archive-page .right-sidebar { grid-column: 2; grid-row: 2; }
   .archive-page .editor-column { grid-column: 1; grid-row: 2; }
 }
+
+.readonly-document p { margin: 0; }
+.readonly-document p + p { margin-top: 0.7lh; }
+.readonly-document hr { border: 0; border-top: 1px solid #dedede; margin: 1lh 0; }
+.readonly-document strong { font-weight: bold; }
+.readonly-document em { font-style: italic; }
+.readonly-document u { text-decoration: underline; }
+
+/* Archive uses the shared editor/rail, with text editing disabled. */
+.archive-writing-entry { position: relative; }
+.archive-writing-entry .writing-scroll { min-height: 0; height: auto; overflow: visible; }
+.archive-writing-entry .writing-editor { min-height: 0; cursor: text; }
+.archive-writing-entry .writing-editor .ProseMirror { min-height: 0; padding: 0; cursor: text; }
+.archive-writing-entry .ProseMirror > p:only-child:has(> br:only-child)::before { content: none; }
+.my-texts .archive-record-info { display: block; font: 13px/1.45 system-ui, sans-serif; color: #777; margin-bottom: 12px; }
+.archive-rail-host { position: absolute; inset: 0; pointer-events: none; }
+.archive-rail-host .semantic-group { pointer-events: auto; }
+.archive-semantic-title { font-size: 15px; font-weight: 600; }
+.archive-semantic-tags { font-size: 14px; font-weight: 400; }

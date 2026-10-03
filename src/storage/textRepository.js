@@ -1,3 +1,5 @@
+import { CONTENT_FORMAT, CONTENT_VERSION, parseDocument, documentToContent, isDocumentEmpty } from '../editor/document.js'
+import { parseSemanticMarkup } from '../editor/semanticSnapshot.js'
 import { advanceDay, canWriteDay } from '../domain/grace.js'
 import { updateDayGoal } from '../domain/wordGoal.js'
 import { transaction } from './database.js'
@@ -37,6 +39,24 @@ export function listTexts(userId) {
 }
 
 export function saveText(context, previous, content, acceptedAt = Date.now(), sessionId = null) {
+  return saveSnapshot(context, previous, { content }, !content.trim(), acceptedAt, sessionId)
+}
+
+export async function saveRichText(context, previous, snapshot, acceptedAt = Date.now(), sessionId = null) {
+  if (snapshot?.contentFormat !== CONTENT_FORMAT || snapshot.contentVersion !== CONTENT_VERSION) {
+    throw new Error('Неподдерживаемая версия документа')
+  }
+  const parsed = parseDocument(snapshot.document)
+  const document = parsed.toJSON()
+  const semanticMarkup = parseSemanticMarkup(snapshot.semanticMarkup, parsed.content.size)
+  return saveSnapshot(context, previous, {
+    contentFormat: CONTENT_FORMAT, contentVersion: CONTENT_VERSION, document,
+    content: documentToContent(document), semanticMarkup,
+  }, isDocumentEmpty(document), acceptedAt, sessionId)
+}
+
+function saveSnapshot(context, previous, snapshot, empty, acceptedAt, sessionId) {
+  const { content } = snapshot
   return transaction(['settings', 'texts', 'userDays'], 'readwrite', (tx, done, fail) => {
     const store = tx.objectStore('texts')
     const request = store.index('userDay').get([context.userId, context.dayKey])
@@ -46,7 +66,13 @@ export function saveText(context, previous, content, acceptedAt = Date.now(), se
         fail(new Error('Текст изменён в другой вкладке. Эта версия не перезаписана.'))
         return
       }
-      if (!current && !content.trim()) { done(null); return }
+      if (current?.contentFormat !== undefined && (current.contentFormat !== CONTENT_FORMAT || current.contentVersion !== CONTENT_VERSION)) {
+        fail(new Error('Неподдерживаемая версия сохранённого документа.')); return
+      }
+      if (current?.contentFormat && !snapshot.contentFormat) {
+        fail(new Error('Rich-text документ нельзя перезаписать plain text редактором.')); return
+      }
+      if (!current && empty) { done(null); return }
       const days = tx.objectStore('userDays')
       const lookup = days.index('userDay').get([context.userId, context.dayKey])
       lookup.onsuccess = () => {
@@ -61,7 +87,7 @@ export function saveText(context, previous, content, acceptedAt = Date.now(), se
         }
         const now = Date.now()
         const record = {
-          ...(current || context), textId: current?.textId || crypto.randomUUID(), content,
+          ...(current || context), textId: current?.textId || crypto.randomUUID(), ...snapshot,
           revision: (current?.revision || 0) + 1, serverRevision: null,
           createdAt: current?.createdAt || now, updatedAt: now,
         }

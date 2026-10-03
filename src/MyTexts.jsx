@@ -1,20 +1,35 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import ArchiveWritingEntry from './components/ArchiveWritingEntry.jsx'
+import ReadonlySemanticMarkup from './components/ReadonlySemanticMarkup.js'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { listTexts } from './storage/textRepository'
 import { getWordCount } from './domain/wordCount'
 import './MyTexts.css'
 
+function ArchiveRailHost({ textId, register }) {
+  const ref = useCallback(node => register(textId, node), [textId, register])
+  return <div className="archive-rail-host" ref={ref} />
+}
+
 function dateLabel(key) {
   return key.split('-').reverse().join('.')
 }
 
-export default function MyTexts({ userId, flush, onTotalWords, metadataHost }) {
+export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved }) {
   const [records, setRecords] = useState(null)
   const [expanded, setExpanded] = useState(() => new Set())
   const [failed, setFailed] = useState(false)
   const [metadataLayout, setMetadataLayout] = useState(null)
+  const [railHosts, setRailHosts] = useState({})
+  const registerHost = useCallback((id, node) => setRailHosts(previous => previous[id] === node ? previous : { ...previous, [id]: node }), [])
+  const handleSaved = useCallback(async (saved, previous) => {
+    setRecords(items => items.map(item => item.textId === saved.textId ? saved : item))
+    await onMetadataSaved?.(saved, previous)
+  }, [onMetadataSaved])
   const pendingWrites = useRef(flush)
   const scrollArea = useRef(null)
+  const [scrollElement, setScrollElement] = useState(null)
+  const setScrollArea = useCallback(node => { scrollArea.current = node; setScrollElement(node) }, [])
   const positioned = useRef(false)
   const pendingExpansion = useRef(null)
   const [hasOpened, setHasOpened] = useState(false)
@@ -112,7 +127,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost }) {
   }
 
   return <><div className="editor-shell my-texts">
-    <div className={`archive-scroll${hasOpened ? ' is-reading' : ''}`} ref={scrollArea}>
+    <div className={`archive-scroll${hasOpened ? ' is-reading' : ''}`} ref={setScrollArea}>
       {failed ? <p role="alert">Не удалось прочитать сохранённые тексты.</p>
         : !records ? <p role="status">Загружаю…</p>
         : records.length ? <ul>
@@ -120,25 +135,37 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost }) {
             {!expanded.has(record.textId) ? <button type="button" aria-label={`Раскрыть текст за ${dateLabel(record.dayKey)}`} aria-expanded={false} onClick={() => toggleRecord(record)}>
               <span className="text-preview">{record.content.trim().replace(/\s+/g, ' ').slice(0, 240) || 'Текст пуст.'}</span>
             </button> : null}
-            {expanded.has(record.textId) ? <div className="saved-text" aria-label="Сохранённый текст, только для чтения">{record.content || 'Текст пуст.'}</div> : null}
+            {expanded.has(record.textId) ? <>
+              <button className="archive-record-info" type="button" aria-expanded aria-label={`Свернуть текст за ${dateLabel(record.dayKey)}`} onClick={() => toggleRecord(record)}>
+                {dateLabel(record.dayKey)} · {getWordCount(record.content).toLocaleString('ru-RU')} слов
+              </button>
+              <div className="saved-text" aria-label="Сохранённый текст, только для чтения">
+                <ArchiveWritingEntry record={record} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
+              </div>
+            </> : null}
           </li>)}
         </ul> : <p>Сохранённых текстов пока нет.</p>}
     </div>
   </div>
     {metadataHost && metadataLayout && records ? createPortal(
       <div className="archive-day-metadata" style={{ top: metadataLayout.top, height: metadataLayout.height }}>
-        {records.map((record, index) => <button
+        {records.map((record, index) => expanded.has(record.textId)
+          ? <ArchiveRailHost key={record.textId} textId={record.textId} register={registerHost} />
+          : <div
           key={record.textId}
-          type="button"
           className="archive-day-label"
           style={{ top: metadataLayout.positions[index]?.top ?? 0 }}
+        ><button
+          type="button"
           aria-expanded={expanded.has(record.textId)}
           aria-label={`${expanded.has(record.textId) ? 'Свернуть' : 'Раскрыть'} текст за ${dateLabel(record.dayKey)}`}
           onClick={() => toggleRecord(record)}
         >
           <span>{dateLabel(record.dayKey)}</span>
           <span>{getWordCount(record.content).toLocaleString('ru-RU')} слов</span>
-        </button>)}
+        </button>
+          <ReadonlySemanticMarkup record={record} />
+        </div>)}
       </div>, metadataHost,
     ) : null}
   </>

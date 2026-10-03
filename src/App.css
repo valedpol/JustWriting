@@ -267,52 +267,6 @@
   margin-top: calc(var(--navigation-group-gap) - var(--navigation-item-gap));
 }
 
-.selection-toolbar {
-  position: fixed;
-  transform: translate(-50%, calc(-100% - 8px));
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  background: #fff;
-  border: 1px solid #d9d9d9;
-  z-index: 2;
-}
-
-.selection-toolbar button {
-  border: 1px solid #d9d9d9;
-  background: #fff;
-  color: #3c3c3c;
-  padding: 5px 8px;
-  font-size: 0.76rem;
-  cursor: pointer;
-}
-
-.selection-toolbar button.danger {
-  color: #7d3d32;
-}
-
-.editor-shell textarea {
-  width: 100%;
-  min-height: 620px;
-  border: none;
-  resize: none;
-  background: transparent;
-  color: #171717;
-  font: 400 20px/1.55 'Georgia', 'Times New Roman', serif;
-  padding: 28px 28px 20px;
-  outline: none;
-  scrollbar-width: none;
-}
-
-.editor-shell textarea::-webkit-scrollbar {
-  display: none;
-}
-
-.editor-shell textarea::placeholder {
-  color: #9b9b9b;
-}
-
 .bottom-bar {
   display: flex;
   align-items: center;
@@ -341,10 +295,8 @@
 }
 
 .app-shell.screen-writing-standard .left-sidebar,
-.app-shell.screen-writing-standard .right-sidebar,
 .app-shell.screen-writing-wide .meta-block,
-.app-shell.screen-writing-wide .left-sidebar,
-.app-shell.screen-writing-wide .right-sidebar {
+.app-shell.screen-writing-wide .left-sidebar {
   display: none;
 }
 
@@ -382,7 +334,7 @@
 }
 
 .app-shell.screen-writing-wide .main-layout {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) 180px;
 }
 
 .app-shell.screen-writing-wide .editor-column {
@@ -433,7 +385,7 @@
 .app-shell:is(.screen-writing-standard, .screen-writing-wide) {
   --text-buffer-clear: 24px;
   --text-buffer-end: 40px;
-  /* Match interface: column inset + container border + textarea inset. */
+  /* Match interface: column inset + container border + editor inset. */
   --writing-text-inset: calc(18px + 1px + 28px);
   height: 100vh;
   height: 100dvh;
@@ -468,17 +420,6 @@
   border-inline: 1px solid transparent;
 }
 
-.app-shell:is(.screen-writing-standard, .screen-writing-wide) .editor-shell textarea {
-  display: block;
-  height: 100%;
-  min-height: 0;
-  padding-top: var(--writing-text-inset);
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-mask-image: linear-gradient(to bottom, transparent var(--text-buffer-clear), #000 var(--text-buffer-end));
-  mask-image: linear-gradient(to bottom, transparent var(--text-buffer-clear), #000 var(--text-buffer-end));
-}
-
 @media (max-width: 900px) {
   .app-shell.screen-writing-standard .editor-column {
     grid-column: 1;
@@ -488,4 +429,35 @@
 .word-counter-goal-pending { opacity: 0.5; font-weight: 400; }
 .screen-writing-standard .word-counter { font-weight: 700; }
 
-.grace-alarm { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 80vw; font-size: 12px; color: #a32929; text-align: center; }
+.grace-alarm {
+  flex: 0 0 auto;
+  padding: 8px 24px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.grace-alarm,
+.meta-block.is-grace .meta-countdown-label,
+.meta-block.is-grace .meta-timer {
+  color: #a32929;
+}
+
+.research-local-children { display: flex; flex-direction: column; gap: var(--navigation-item-gap); padding-left: 18px; }
+.screen-interface .research-local-menu .menu-item { margin-top: 0; }
+.screen-interface .research-local-menu .research-local-exit { margin-top: calc(var(--navigation-group-gap) - var(--navigation-item-gap)); }
+
+/* Interaction cues do not change the layout or resting appearance. */
+.app-shell :is(button, select, [role="button"]):not(:disabled):not([aria-disabled="true"]),
+.app-shell a[href],
+.app-shell .meta-countdown-label,
+.app-shell [role="combobox"]:not(:disabled),
+.app-shell [role="option"]:not([aria-disabled="true"]),
+.app-shell.screen-interface .writing-editor {
+  cursor: pointer;
+}
+.app-shell :is(button, select, [role="button"]):is(:disabled, [aria-disabled="true"]) {
+  cursor: default;
+}
+.app-shell .side-menu button.menu-item:not(.is-active):not(:disabled):not([aria-disabled="true"]):hover {
+  background-color: #f4f4f4;
+}

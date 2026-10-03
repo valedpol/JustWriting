@@ -1,0 +1,76 @@
+.today-editor-shell[hidden] { display: none !important; }
+.today-editor-shell { position: relative; }
+.writing-scroll { width: 100%; min-height: 620px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.writing-scroll::-webkit-scrollbar { display: none; }
+.writing-editor { min-height: 100%; }
+.writing-editor .ProseMirror { min-height: 620px; padding: 28px 28px 20px; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 20px/1.55 Georgia, 'Times New Roman', serif; color: #171717; }
+.writing-editor .ProseMirror p { margin: 0; }
+.writing-editor .ProseMirror p + p { margin-top: 0.7lh; }
+.writing-editor .ProseMirror hr { border: 0; border-top: 1px solid #dedede; margin: 1lh 0; }
+.writing-editor .ProseMirror strong { font-weight: bold; }
+.writing-editor .ProseMirror em { font-style: italic; }
+.writing-editor .ProseMirror u { text-decoration: underline; }
+.writing-editor .ProseMirror > p:only-child:has(> br:only-child)::before { content: 'Пиши просто. Просто пиши.'; color: #9b9b9b; float: left; height: 0; pointer-events: none; }
+.ProseMirror-selectednode { outline: 1px solid #aaa; }
+.screen-interface .writing-editor { cursor: pointer; }
+/* Only today's interface owns a fixed viewport; the text scrolls inside its frame. */
+.app-shell.screen-interface:has(.today-editor-shell:not([hidden])) {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.app-shell.screen-interface:has(.today-editor-shell:not([hidden])) :is(.topbar, .bottom-bar) {
+  flex-shrink: 0;
+}
+.app-shell.screen-interface:has(.today-editor-shell:not([hidden])) .main-layout {
+  grid-template-rows: minmax(0, 1fr);
+}
+.app-shell.screen-interface:has(.today-editor-shell:not([hidden])) .editor-column,
+.app-shell.screen-interface .today-editor-shell {
+  min-height: 0;
+  min-width: 0;
+}
+.app-shell.screen-interface .today-editor-shell .writing-scroll {
+  min-height: 0;
+  height: 100%;
+}
+.app-shell.screen-interface .today-editor-shell .ProseMirror {
+  min-height: 0;
+}
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .writing-scroll { min-height: 0; height: 100%; -webkit-mask-image: linear-gradient(to bottom, transparent var(--text-buffer-clear), #000 var(--text-buffer-end)); mask-image: linear-gradient(to bottom, transparent var(--text-buffer-clear), #000 var(--text-buffer-end)); }
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .writing-editor .ProseMirror { min-height: 100%; padding-top: var(--writing-text-inset); padding-bottom: 35vh; }
+.app-shell:is(.screen-writing-standard, .screen-writing-wide) .right-sidebar { display: block; grid-column: 3; position: relative; overflow: hidden; padding-top: 0; }
+.app-shell.screen-writing-wide .main-layout { grid-template-columns: minmax(0, 1fr) 180px; }
+.app-shell.screen-writing-wide .right-sidebar { grid-column: 2; }
+.app-shell.screen-writing-wide .editor-column { grid-column: 1; }
+.app-shell .right-sidebar { position: relative; }
+.semantic-rail { position: absolute; inset: 0 12px; overflow: hidden; font: 13px/1.45 system-ui, sans-serif; color: #777; }
+.semantic-group { position: absolute; left: 0; right: 0; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; }
+.semantic-label { position: relative; min-width: 0; max-width: 100%; padding-right: 18px; }
+.semantic-rail button { border: 0; background: none; padding: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.semantic-value { display: block; overflow-wrap: anywhere; max-height: 3em; overflow: hidden; }
+.semantic-rail .semantic-value { font-size: 14px; font-weight: 400; }
+.semantic-rail .semantic-value[data-kind="title"] { font-size: 15px; font-weight: 600; }
+.semantic-boundary { display: block; font-size: 11px !important; margin-top: 3px; }
+.semantic-boundary:disabled { opacity: .45; cursor: default; }
+.semantic-remove { position: absolute; top: 0; right: 0; }
+.semantic-draft { position: relative; margin-top: 12px; background: #fff; }
+.semantic-draft small { display: block; }
+.editor-panel { position: fixed; z-index: 20; transform: translateX(-50%); padding: 7px; background: #fff; border: 1px solid #d9d9d9; box-shadow: 0 3px 12px #0000000d; max-width: calc(100vw - 16px); font: 13px/1.4 system-ui, sans-serif; }
+.editor-panel-row { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.editor-panel button { border: 0; padding: 5px 8px; background: #fff; color: #333; font: inherit; cursor: pointer; }
+.editor-panel button:hover, .editor-panel button[aria-pressed=true] { background: #f0f0f0; }
+.semantic-picker { width: 265px; padding-top: 8px; }
+.semantic-picker input { box-sizing: border-box; width: 100%; padding: 6px; font: inherit; border: 1px solid #bbb; }
+.semantic-suggestions { display: flex; flex-direction: column; max-height: 150px; overflow-y: auto; }
+.semantic-suggestions button { text-align: left; overflow-wrap: anywhere; }
+.editor-message { position: absolute; bottom: 0; z-index: 3; background: white; font: 13px system-ui; padding: 8px; }
+@media (max-width: 900px) {
+  .app-shell.screen-interface:has(.today-editor-shell:not([hidden])) .main-layout { grid-template-rows: auto minmax(0, 1fr); }
+  .app-shell:has(.today-editor-shell:not([hidden])) .main-layout { grid-template-columns: minmax(0, 1fr) 130px; }
+  .app-shell:has(.today-editor-shell:not([hidden])) .left-sidebar { grid-column: 1 / -1; }
+  .app-shell:has(.today-editor-shell:not([hidden])) .editor-column { grid-column: 1; }
+  .app-shell:has(.today-editor-shell:not([hidden])) .right-sidebar { grid-column: 2; }
+  .writing-editor .ProseMirror { padding-inline: 18px; }
+}
