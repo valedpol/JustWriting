@@ -4,11 +4,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import { listTexts } from './storage/textRepository'
 import { getWordCount } from './domain/wordCount'
+import { archiveDateTop, collapseAnchor } from './domain/archiveViewport.js'
 import './MyTexts.css'
 
-function ArchiveRailHost({ textId, register }) {
+function ArchiveRailHost({ textId, register, onActive }) {
   const ref = useCallback(node => register(textId, node), [textId, register])
-  return <div className="archive-rail-host" ref={ref} />
+  return <div className="archive-rail-host" ref={ref} onMouseDownCapture={onActive} onFocusCapture={onActive} />
 }
 
 function dateLabel(key) {
@@ -28,10 +29,14 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   }, [onMetadataSaved])
   const pendingWrites = useRef(flush)
   const scrollArea = useRef(null)
+  const actionsSlot = useRef(null)
   const [scrollElement, setScrollElement] = useState(null)
   const setScrollArea = useCallback(node => { scrollArea.current = node; setScrollElement(node) }, [])
   const positioned = useRef(false)
   const pendingExpansion = useRef(null)
+  const pendingCollapse = useRef(null)
+  const activeRecord = useRef(null)
+  const editors = useRef(new Map())
   const [hasOpened, setHasOpened] = useState(false)
 
   useEffect(() => {
@@ -60,16 +65,35 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   useLayoutEffect(() => {
     const area = scrollArea.current
     if (!area || !records?.length) return
+    const anchor = pendingCollapse.current
+    pendingCollapse.current = null
+    if (anchor) {
+      const item = Array.from(area.querySelectorAll('[data-text-id]')).find(node => node.dataset.textId === anchor.textId)
+      if (item) {
+        const list = area.querySelector('ul')
+        const desiredScroll = area.scrollTop + item.getBoundingClientRect().top - area.getBoundingClientRect().top - anchor.top
+        // Near the beginning the collapsed rows may be too short to keep the
+        // anchor in place: provide space rather than requesting negative scroll.
+        if (desiredScroll < 0 && list) {
+          const padding = parseFloat(getComputedStyle(list).paddingTop) || 0
+          list.style.paddingTop = `${padding - desiredScroll}px`
+        }
+        area.scrollTop += item.getBoundingClientRect().top - area.getBoundingClientRect().top - anchor.top
+      }
+      return
+    }
     const openedId = pendingExpansion.current
     pendingExpansion.current = null
     if (openedId) {
+      const list = area.querySelector('ul')
+      if (list) list.style.paddingTop = ''
       if (openedId === records[0].textId) {
         area.scrollTop = 0
       } else {
         const item = Array.from(area.querySelectorAll('[data-text-id]')).find((node) => node.dataset.textId === openedId)
         const content = item?.querySelector('.saved-text')
         if (content) {
-          const lineHeight = parseFloat(getComputedStyle(content).lineHeight)
+          const lineHeight = parseFloat(getComputedStyle(content).lineHeight) || 31
           const contextHeight = Math.min(lineHeight * 3, area.clientHeight / 3)
           area.scrollTop += content.getBoundingClientRect().top - area.getBoundingClientRect().top - contextHeight
         }
@@ -95,9 +119,14 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       const host = metadataHost.getBoundingClientRect()
       setMetadataLayout({
         top: viewport.top - host.top, height: viewport.height,
-        positions: Array.from(area.querySelectorAll('[data-text-id]')).map((item) => ({
-          textId: item.dataset.textId, top: item.getBoundingClientRect().top - viewport.top,
-        })),
+        actionsTop: actionsSlot.current.getBoundingClientRect().top - host.top,
+        positions: Array.from(area.querySelectorAll('[data-text-id]')).map((item) => {
+          const bounds = item.getBoundingClientRect()
+          const date = Array.from(metadataHost.querySelectorAll('[data-archive-date]'))
+            .find(node => node.dataset.archiveDate === item.dataset.textId)
+          return { textId: item.dataset.textId, top: bounds.top - viewport.top,
+            bottom: bounds.bottom - viewport.top, dateHeight: date?.parentElement.getBoundingClientRect().height || 40 }
+        }),
       })
     }
     alignMetadata()
@@ -126,21 +155,46 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     })
   }
 
+  const collapseAll = () => {
+    const area = scrollArea.current
+    if (!area || !expanded.size) return
+    const viewport = area.getBoundingClientRect()
+    const entries = Array.from(area.querySelectorAll('[data-text-id]'))
+      .filter(node => expanded.has(node.dataset.textId)).map(node => {
+        const bounds = node.getBoundingClientRect()
+        return { textId: node.dataset.textId, top: bounds.top - viewport.top, bottom: bounds.bottom - viewport.top }
+      })
+    pendingCollapse.current = collapseAnchor(entries, activeRecord.current, area.clientHeight)
+    pendingExpansion.current = null
+    setExpanded(new Set())
+  }
+
+  const selectDay = record => {
+    activeRecord.current = record.textId
+    editors.current.get(record.textId)?.toggleSelection()
+  }
+
   return <><div className="editor-shell my-texts">
+    <div className="archive-actions-space" ref={actionsSlot} aria-hidden="true" />
     <div className={`archive-scroll${hasOpened ? ' is-reading' : ''}`} ref={setScrollArea}>
       {failed ? <p role="alert">Не удалось прочитать сохранённые тексты.</p>
         : !records ? <p role="status">Загружаю…</p>
         : records.length ? <ul>
-          {records.map((record) => <li key={record.textId} data-text-id={record.textId}>
-            {!expanded.has(record.textId) ? <button type="button" aria-label={`Раскрыть текст за ${dateLabel(record.dayKey)}`} aria-expanded={false} onClick={() => toggleRecord(record)}>
+          {records.map((record) => <li key={record.textId} data-text-id={record.textId}
+            onMouseDownCapture={() => { activeRecord.current = record.textId }}
+            onFocusCapture={() => { activeRecord.current = record.textId }}>
+            {!expanded.has(record.textId) ? <button className="archive-preview-button" type="button" aria-label={`Раскрыть текст за ${dateLabel(record.dayKey)}`} aria-expanded={false} onClick={() => toggleRecord(record)}>
               <span className="text-preview">{record.content.trim().replace(/\s+/g, ' ').slice(0, 240) || 'Текст пуст.'}</span>
             </button> : null}
             {expanded.has(record.textId) ? <>
-              <button className="archive-record-info" type="button" aria-expanded aria-label={`Свернуть текст за ${dateLabel(record.dayKey)}`} onClick={() => toggleRecord(record)}>
-                {dateLabel(record.dayKey)} · {getWordCount(record.content).toLocaleString('ru-RU')} слов
+              <div className="archive-record-header" onClick={() => toggleRecord(record)}>
+              <button className="archive-record-info" type="button" aria-expanded aria-label={`Свернуть текст за ${dateLabel(record.dayKey)}`}>
+                {dateLabel(record.dayKey)}
               </button>
+              </div>
               <div className="saved-text" aria-label="Сохранённый текст, только для чтения">
-                <ArchiveWritingEntry record={record} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
+                <ArchiveWritingEntry ref={editor => { if (editor) editors.current.set(record.textId, editor); else editors.current.delete(record.textId) }}
+                  record={record} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
               </div>
             </> : null}
           </li>)}
@@ -148,25 +202,47 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     </div>
   </div>
     {metadataHost && metadataLayout && records ? createPortal(
+      <>
+      {expanded.size > 0 ? <div className="archive-actions" style={{ top: metadataLayout.actionsTop }}>
+        <button type="button" onClick={collapseAll}>Схлопнуть все тексты</button>
+      </div> : null}
       <div className="archive-day-metadata" style={{ top: metadataLayout.top, height: metadataLayout.height }}>
-        {records.map((record, index) => expanded.has(record.textId)
-          ? <ArchiveRailHost key={record.textId} textId={record.textId} register={registerHost} />
-          : <div
+        {records.map((record, index) => {
+          const position = metadataLayout.positions[index]
+          const open = expanded.has(record.textId)
+          const top = position?.top ?? 0
+          const bottom = position?.bottom ?? top
+          return open ? <div key={record.textId}>
+            <button type="button" className="archive-collapse-strip"
+              style={{ top: Math.max(0, top), height: Math.max(0, Math.min(metadataLayout.height, bottom) - Math.max(0, top)) }}
+              aria-label={`Свернуть текст за ${dateLabel(record.dayKey)}`} onClick={() => toggleRecord(record)} />
+            <ArchiveRailHost textId={record.textId} register={registerHost} onActive={() => { activeRecord.current = record.textId }} />
+            <div className="archive-day-label archive-sticky-date"
+              style={{ top: archiveDateTop(top, bottom, position?.dateHeight ?? 40) }}>
+              <button type="button" data-archive-date={record.textId}
+                aria-label={`Выделить весь текст за ${dateLabel(record.dayKey)}`}
+                onMouseDown={event => event.preventDefault()} onClick={() => selectDay(record)}>
+                <span>{dateLabel(record.dayKey)}</span>
+                <span>{getWordCount(record.content).toLocaleString('ru-RU')} слов</span>
+              </button>
+            </div>
+          </div> : <div
           key={record.textId}
           className="archive-day-label"
-          style={{ top: metadataLayout.positions[index]?.top ?? 0 }}
+          style={{ top, minHeight: Math.max(0, bottom - top) }}
+          onClick={() => toggleRecord(record)}
         ><button
           type="button"
           aria-expanded={expanded.has(record.textId)}
           aria-label={`${expanded.has(record.textId) ? 'Свернуть' : 'Раскрыть'} текст за ${dateLabel(record.dayKey)}`}
-          onClick={() => toggleRecord(record)}
         >
           <span>{dateLabel(record.dayKey)}</span>
           <span>{getWordCount(record.content).toLocaleString('ru-RU')} слов</span>
         </button>
           <ReadonlySemanticMarkup record={record} />
-        </div>)}
-      </div>, metadataHost,
+        </div>
+        })}
+      </div></>, metadataHost,
     ) : null}
   </>
 }

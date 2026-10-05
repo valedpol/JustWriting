@@ -1,10 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { EditorView } from '@tiptap/pm/view'
-import { Selection } from '@tiptap/pm/state'
+import { AllSelection, Selection } from '@tiptap/pm/state'
 import { toggleMark } from '@tiptap/pm/commands'
 import { ReplaceStep } from '@tiptap/pm/transform'
 import { focusView } from '../editor/focusView.js'
+import { coversWholeText } from '../editor/nativeSelection.js'
 import { cleanPaste } from '../editor/paste.js'
 import { assignSelectionMarkup, confirmSlashMarkup, getSemanticMarkup, trackSemanticTransaction } from '../editor/semanticHistory.js'
 import { listTexts } from '../storage/textRepository.js'
@@ -29,6 +30,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   const [position, setPosition] = useState(null)
   const [message, setMessage] = useState('')
   const [focused, setFocused] = useState(false)
+  const [nativeSelected, setNativeSelected] = useState(null)
   const panelOpen = Boolean(panel)
   const categoryOpen = Boolean(panel?.category)
   const ime = useRef({ timer: null, ending: false, acceptedAt: null })
@@ -58,6 +60,21 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
 
   useImperativeHandle(ref, () => ({
     get instance() { return viewRef.current },
+    selectAll() {
+      const view = viewRef.current
+      if (!view) return
+      view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)))
+      focusView(view)
+    },
+    toggleSelectAll() {
+      const view = viewRef.current
+      if (!view) return
+      const clear = coversWholeText(view.dom, view.dom.ownerDocument.getSelection())
+      cancelPanel()
+      view.dispatch(view.state.tr.setSelection(clear ? Selection.atStart(view.state.doc) : new AllSelection(view.state.doc)))
+      focusView(view)
+      setNativeSelected(!clear)
+    },
     focus(end = false) {
       const view = viewRef.current
       if (!view) return
@@ -146,6 +163,23 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       },
     })
     viewRef.current = view
+    const selectionChanged = () => {
+      const ownerDocument = view.dom.ownerDocument
+      // Focusing the picker is a panel interaction, not deselecting the text.
+      if (panelRef.current?.category && toolbarRef.current?.contains(ownerDocument.activeElement)) return
+      const selection = ownerDocument.getSelection()
+      const selected = Boolean(selection && !selection.isCollapsed && view.dom.contains(selection.anchorNode) && view.dom.contains(selection.focusNode))
+      setNativeSelected(selected)
+      if (!selected && panelRef.current?.source === 'selection') cancelPanel()
+      if (!selected && latest.current.readonlyContent && !controller.state.selection.empty) {
+        let position = controller.state.selection.from
+        if (selection?.anchorNode && view.dom.contains(selection.anchorNode)) {
+          try { position = view.posAtDOM(selection.anchorNode, selection.anchorOffset) } catch { /* use previous boundary */ }
+        }
+        controller.dispatch(controller.state.tr.setSelection(Selection.near(controller.state.doc.resolve(position)))).catch(report)
+      }
+    }
+    view.dom.ownerDocument.addEventListener('selectionchange', selectionChanged)
     setRuntime({ view, scroller: host.current.parentElement })
     const unsubscribe = controller.subscribe(snapshot => {
       const pending = panelRef.current
@@ -156,7 +190,11 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       view.updateState(panelRef.current?.preview ?? snapshot.state)
       refresh()
     })
-    return () => { clearTimeout(compositionState.timer); unsubscribe(); view.destroy(); viewRef.current = null }
+    return () => {
+      clearTimeout(compositionState.timer); unsubscribe()
+      view.dom.ownerDocument.removeEventListener('selectionchange', selectionChanged)
+      view.destroy(); viewRef.current = null
+    }
   }, [controller, cancelPanel, finishIME, scheduleIME, refresh, report, setPanel, readonlyContent])
 
   useLayoutEffect(() => {
@@ -232,7 +270,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     { userId: controller.snapshot.context.userId, semanticMarkup: getSemanticMarkup(state) },
   ], controller.snapshot.context.userId, panel.category, panel.query) : []
   const selected = state && !state.selection.empty
-  const panelVisible = active && writing && ready && position && (panel || (selected && focused))
+  const panelVisible = active && writing && ready && position && (panel || (selected && focused && nativeSelected !== false))
   useLayoutEffect(() => {
     const element = toolbarRef.current
     const view = viewRef.current

@@ -1,18 +1,34 @@
 import { registerBackupFlush } from '../backup/backup.js'
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import WritingEditor from './WritingEditor.jsx'
 import ReadonlyDocument from './ReadonlyDocument.js'
 import { createArchiveController } from '../editor/archiveController.js'
+import { coversWholeText } from '../editor/nativeSelection.js'
 
-export default function ArchiveWritingEntry({ record, metadataHost, scrollElement, onSaved }) {
+const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, metadataHost, scrollElement, onSaved }, ref) {
+  const editor = useRef(null)
+  const fallback = useRef(null)
   const [loaded] = useState(() => {
     try { return { controller: createArchiveController(record, { onSaved }) } }
     catch { return { error: true } }
   })
   useEffect(() => loaded.controller ? registerBackupFlush(() => loaded.controller.flush()) : undefined, [loaded])
-  if (loaded.error) return <ReadonlyDocument record={record} />
+  useImperativeHandle(ref, () => ({ toggleSelection() {
+    if (editor.current) editor.current.toggleSelectAll()
+    else if (fallback.current) {
+      const range = document.createRange()
+      range.selectNodeContents(fallback.current)
+      const selection = window.getSelection()
+      if (coversWholeText(fallback.current, selection)) { selection.removeAllRanges(); return }
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
+  } }), [])
+  if (loaded.error) return <div ref={fallback}><ReadonlyDocument record={record} /></div>
   return <div className="archive-writing-entry">
-    <WritingEditor controller={loaded.controller} active writing ready readonlyContent
+    <WritingEditor ref={editor} controller={loaded.controller} active writing ready readonlyContent
       metadataHost={metadataHost} scrollElement={scrollElement} />
   </div>
-}
+})
+
+export default ArchiveWritingEntry

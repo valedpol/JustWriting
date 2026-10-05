@@ -105,6 +105,128 @@ async function fixture(options = {}) {
   await render()
   return { controller, container, sidebar, ref, render, async close() { await act(async () => root.unmount()); container.remove(); sidebar.remove() } }
 }
+
+test('archive dates select only day text; collapse zones and collapse-all preserve anchor without writes', async () => {
+  const { default: MyTexts } = await server.ssrLoadModule('/src/MyTexts.jsx')
+  const { listTexts } = await server.ssrLoadModule('/src/storage/textRepository.js')
+  const { transaction } = await server.ssrLoadModule('/src/storage/database.js')
+  const userId = crypto.randomUUID()
+  const originals = ['2026-09-25', '2026-09-26', '2026-09-27'].map((dayKey, i) => ({
+    textId: crypto.randomUUID(), userId, dayKey, revision: 1, content: `Текст дня ${i + 1}\nВторая строка`,
+  }))
+  await transaction(['texts'], 'readwrite', tx => originals.forEach(record => tx.objectStore('texts').add(record)))
+  const before = await listTexts(userId)
+  const readOtherStores = () => transaction(['settings', 'userDays', 'wordCountSamples'], 'readonly', (tx, done) => {
+    const values = {}
+    for (const name of ['settings', 'userDays', 'wordCountSamples']) {
+      const request = tx.objectStore(name).getAll()
+      request.onsuccess = () => { values[name] = request.result }
+    }
+    done(values)
+  })
+  const otherStoresBefore = await readOtherStores()
+  const container = document.createElement('div'); document.body.append(container)
+  const sidebar = document.createElement('aside'); document.body.append(sidebar)
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect
+  const originalElementFromPoint = document.elementFromPoint
+  document.elementFromPoint = () => null
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.classList.contains('archive-scroll')) return { ...rect, top: 100, bottom: 700, height: 600 }
+    if (this.matches('li[data-text-id]')) {
+      const siblings = [...this.parentElement.children]
+      let top = 100 - container.querySelector('.archive-scroll').scrollTop + (parseFloat(this.parentElement.style.paddingTop) || 0)
+      for (const sibling of siblings) {
+        if (sibling === this) break
+        top += (sibling.querySelector('.saved-text') ? 500 : 50) + 63
+      }
+      const height = this.querySelector('.saved-text') ? 500 : 50
+      return { ...rect, top, bottom: top + height, height }
+    }
+    return originalRect.call(this)
+  }
+  const root = createRoot(container)
+  const settle = async predicate => {
+    for (let i = 0; i < 80 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)))
+    assert.ok(predicate(), 'archive should settle')
+  }
+  const entries = () => [...container.querySelectorAll('li[data-text-id]')]
+  try {
+    await act(async () => root.render(createElement(MyTexts, { userId, flush: async () => {}, onTotalWords() {}, metadataHost: sidebar })))
+    await settle(() => entries().length === 3)
+    assert.equal(sidebar.querySelector('.archive-actions'), null)
+    const area = container.querySelector('.archive-scroll')
+    Object.defineProperty(area, 'clientHeight', { value: 600 })
+    await click(sidebar.querySelector('.archive-day-label button'))
+    await settle(() => entries()[0].querySelector('.ProseMirror'))
+    assert.ok(sidebar.querySelector('.archive-actions button'))
+    const date = sidebar.querySelector(`[data-archive-date="${originals[0].textId}"]`)
+    await click(date)
+    assert.equal(window.getSelection().toString(), entries()[0].querySelector('.ProseMirror').textContent)
+    assert.ok(document.querySelector('[role="toolbar"]'))
+    await click(date)
+    assert.ok(window.getSelection().isCollapsed)
+    assert.equal(document.querySelector('[role="toolbar"]'), null)
+    await click(date)
+    const partial = document.createRange()
+    const firstText = entries()[0].querySelector('.ProseMirror p').firstChild
+    partial.setStart(firstText, 1); partial.setEnd(firstText, 4)
+    await act(async () => {
+      window.getSelection().removeAllRanges(); window.getSelection().addRange(partial)
+      document.dispatchEvent(new dom.window.Event('selectionchange'))
+    })
+    await click(date)
+    assert.equal(window.getSelection().toString(), entries()[0].querySelector('.ProseMirror').textContent)
+    await act(async () => {
+      window.getSelection().removeAllRanges()
+      document.dispatchEvent(new dom.window.Event('selectionchange'))
+    })
+    assert.equal(document.querySelector('[role="toolbar"]'), null, 'native deselection must close stale readonly toolbar')
+    await click(date)
+    assert.ok(!window.getSelection().toString().includes('25.09.2026'))
+    assert.equal(entries()[0].querySelector('.archive-record-info').textContent, '25.09.2026')
+    assert.equal(entries()[0].querySelectorAll('.ProseMirror').length, 1)
+    await click(entries()[0].querySelector('.ProseMirror'))
+    assert.ok(entries()[0].querySelector('.ProseMirror'), 'text click must not collapse')
+    await act(async () => { area.scrollTop = 120; area.dispatchEvent(new dom.window.Event('scroll')) })
+    assert.equal(sidebar.querySelector('.archive-sticky-date').style.top, '0px')
+    await act(async () => { area.scrollTop = 490; area.dispatchEvent(new dom.window.Event('scroll')) })
+    assert.equal(sidebar.querySelector('.archive-sticky-date').style.top, '-10px', 'date must leave with its entry')
+    await click(sidebar.querySelector('.archive-collapse-strip'))
+    assert.equal(entries()[0].querySelector('.ProseMirror'), null)
+    assert.equal(sidebar.querySelector('.archive-actions'), null)
+    await click(entries()[0].querySelector('.archive-preview-button'))
+    await settle(() => entries()[0].querySelector('.ProseMirror'))
+    await click(entries()[0].querySelector('.archive-record-header'))
+    assert.equal(entries()[0].querySelector('.ProseMirror'), null)
+
+    // Expand two days, then work in the second one and preserve its row position.
+    await click(entries()[0].querySelector('.archive-preview-button'))
+    await click(entries()[1].querySelector('.archive-preview-button'))
+    await settle(() => entries()[1].querySelector('.ProseMirror'))
+    await click(sidebar.querySelector(`[data-archive-date="${originals[1].textId}"]`))
+    await act(async () => document.dispatchEvent(new dom.window.Event('selectionchange')))
+    assert.equal(window.getSelection().toString(), entries()[1].querySelector('.ProseMirror').textContent)
+    assert.equal(document.querySelectorAll('[role="toolbar"]').length, 1, 'only the selected day owns a toolbar')
+    await act(async () => { area.scrollTop = 400; area.dispatchEvent(new dom.window.Event('scroll')) })
+    await click(entries()[1].querySelector('.ProseMirror'))
+    const beforeTop = entries()[1].getBoundingClientRect().top
+    assert.equal(container.querySelector('.archive-actions button'), null)
+    assert.ok(sidebar.querySelector('.archive-actions button'))
+    await click(sidebar.querySelector('.archive-actions button'))
+    assert.equal(container.querySelector('.ProseMirror'), null)
+    assert.equal(entries()[1].getBoundingClientRect().top, beforeTop)
+    assert.ok(area.scrollTop >= 0, 'anchor must survive browser scroll clamping at the beginning')
+    assert.equal(sidebar.querySelector('.archive-actions'), null)
+    assert.deepEqual(await listTexts(userId), before)
+    assert.deepEqual(await readOtherStores(), otherStoresBefore)
+  } finally {
+    await act(async () => root.unmount())
+    dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect
+    if (originalElementFromPoint) document.elementFromPoint = originalElementFromPoint
+    else delete document.elementFromPoint
+    container.remove(); sidebar.remove()
+  }
+})
 const button = label => [...document.querySelectorAll('button')].find(node => node.textContent === label)
 const click = async node => {
   assert.ok(node, 'button must exist')

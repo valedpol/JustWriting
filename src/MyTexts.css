@@ -1,4 +1,4 @@
-.my-texts { flex: 1; padding: 28px; color: #171717; }
+.my-texts { --archive-text-inset: 28px; flex: 1; padding: 28px 0; color: #171717; }
 .my-texts ul { list-style: none; padding: 0; margin: 0; }
 .my-texts li { position: relative; }
 .my-texts li + li { margin-top: 63px; }
@@ -18,7 +18,8 @@
 .archive-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
 .archive-scroll::-webkit-scrollbar { display: none; }
 /* Enough breathing room to position even the first/last date one third down. */
-.my-texts .archive-scroll ul { padding-block: calc(var(--archive-height, 0px) / 3) calc(var(--archive-height, 0px) * 2 / 3); }
+.my-texts .archive-scroll ul { padding-inline: var(--archive-text-inset); padding-block: calc(var(--archive-height, 0px) / 3) calc(var(--archive-height, 0px) * 2 / 3); }
+.archive-scroll > p { margin-inline: var(--archive-text-inset); }
 
 /* In reading mode preceding entries provide context, not artificial top space. */
 .my-texts .archive-scroll.is-reading ul { padding-top: 0; }
@@ -57,7 +58,30 @@
 .archive-writing-entry .writing-editor { min-height: 0; cursor: text; }
 .archive-writing-entry .writing-editor .ProseMirror { min-height: 0; padding: 0; cursor: text; }
 .archive-writing-entry .ProseMirror > p:only-child:has(> br:only-child)::before { content: none; }
-.my-texts .archive-record-info { display: block; font: 13px/1.45 system-ui, sans-serif; color: #777; margin-bottom: 12px; }
+.my-texts .archive-record-header {
+  position: relative;
+  display: block;
+  margin-inline: calc(-1 * var(--archive-text-inset));
+  width: calc(100% + 2 * var(--archive-text-inset));
+  padding-bottom: 12px;
+  cursor: pointer;
+}
+/* Include the blank half-gap up to the separator, across the entire column.
+   The hit area stays outside the user document and the external date rail. */
+.archive-record-header::before { content: ''; position: absolute; inset: -32px 0 0; }
+.my-texts .archive-record-info { position: relative; display: block; width: 100%; padding-inline: var(--archive-text-inset); font: bold 20px/1.55 Georgia, 'Times New Roman', serif; }
+.my-texts .archive-preview-button { display: block; width: 100%; }
+.archive-actions-space { flex-shrink: 0; height: 35px; }
+.archive-actions { position: absolute; left: 18px; right: 18px; padding-bottom: 16px; font: 13px/1.45 system-ui, sans-serif; }
+.archive-actions button { border: 0; background: transparent; padding: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.archive-actions button:disabled { opacity: .4; cursor: default; }
+.archive-actions button:focus-visible { outline: 1px solid #777; outline-offset: 5px; }
+.archive-scroll { overflow-anchor: none; }
+.archive-collapse-strip { position: absolute; left: 0; right: 0; border: 0; padding: 0; background: transparent; cursor: pointer; }
+.archive-collapse-strip:focus-visible { outline: 1px solid #777; outline-offset: -2px; }
+.archive-sticky-date { z-index: 2; background: #fff; padding-bottom: 8px; }
+.archive-sticky-date > button { flex-wrap: wrap; row-gap: 2px; }
+.archive-rail-host { z-index: 1; }
 .archive-rail-host { position: absolute; inset: 0; pointer-events: none; }
 .archive-rail-host .semantic-group { pointer-events: auto; }
 .archive-semantic-title { font-size: 15px; font-weight: 600; }
