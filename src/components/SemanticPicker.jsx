@@ -2,7 +2,7 @@ const labels = { tag: 'Тег', title: 'Название' }
 
 export function SemanticCategories({ panel, chooseCategory }) {
   return <>
-        {(panel?.source === 'slash' ? ['tag', 'title'] : ['title', 'tag']).map(category => <button key={category} aria-pressed={panel?.category === category} onClick={() => chooseCategory(category)}>{labels[category]}</button>)}
+        {['tag', 'title'].map(category => <button key={category} aria-pressed={panel?.category === category} onClick={() => chooseCategory(category)}>{labels[category]}</button>)}
   </>
 }
 

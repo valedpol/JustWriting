@@ -1,4 +1,5 @@
-import { closeHistory } from '@tiptap/pm/history'
+import { applyArchiveFormatting } from './archivePresentation.js'
+import { closeHistory, undoDepth, redoDepth } from '@tiptap/pm/history'
 import { resolveToday, endWritingSession } from '../storage/dayRepository.js'
 import { saveRichText } from '../storage/textRepository.js'
 import { sampleWordCount } from '../storage/wordCountRepository.js'
@@ -90,12 +91,18 @@ export async function openDaySession({ profile, now = Date.now(), sessionId = nu
         }
         if (record.content !== current.record.content) throw new Error('Архивная операция изменила текст.')
         const loaded = createState(record)
-        const state = loaded.doc.eq(current.state.doc)
-          ? current.state.applyTransaction(closeHistory(current.state.tr).step(new SemanticStep(
-            getSemanticMarkup(current.state), getSemanticMarkup(loaded),
-          )).setMeta('jwSemanticCommand', true)).state
-          : previous.contentFormat === undefined ? loaded : null
-        if (!state) throw new Error('Архивная операция изменила документ.')
+        let state
+        if (previous.contentFormat === undefined && !loaded.doc.eq(current.state.doc)) {
+          // An untouched legacy day has no text-edit history to discard.
+          if (undoDepth(current.state) || redoDepth(current.state)) throw new Error('Нельзя заменить документ с активной историей редактора.')
+          state = loaded
+        } else {
+          const formatting = applyArchiveFormatting(closeHistory(current.state.tr), loaded.doc)
+          const tracked = trackSemanticTransaction(current.state, formatting)
+          const beforeMarkup = tracked.steps.length ? tracked.steps.at(-1).after : getSemanticMarkup(current.state)
+          tracked.step(new SemanticStep(beforeMarkup, getSemanticMarkup(loaded))).setMeta('jwSemanticCommand', true)
+          state = current.state.applyTransaction(tracked).state
+        }
         current = { ...current, state, record }
         return view()
       })

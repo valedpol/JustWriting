@@ -2,7 +2,9 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import { createPortal } from 'react-dom'
 import { EditorView } from '@tiptap/pm/view'
 import { AllSelection, Selection } from '@tiptap/pm/state'
-import { toggleMark } from '@tiptap/pm/commands'
+import { undo, redo } from '@tiptap/pm/history'
+import { firstTextHasMark, toggleFirstTextMark } from '../editor/formatting.js'
+import { assertArchiveTransaction } from '../editor/archivePresentation.js'
 import { ReplaceStep } from '@tiptap/pm/transform'
 import { focusView } from '../editor/focusView.js'
 import { coversWholeText } from '../editor/nativeSelection.js'
@@ -97,7 +99,10 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       transformPastedHTML: cleanPaste,
       dispatchTransaction(tr) {
         if (panelRef.current?.category) return
-        if (latest.current.readonlyContent && tr.docChanged) { view.updateState(controller.state); return }
+        if (latest.current.readonlyContent) {
+          try { assertArchiveTransaction(tr, getSemanticMarkup(controller.state)) }
+          catch (error) { report(error); view.updateState(controller.state); return }
+        }
         const kind = tr.getMeta('uiEvent') === 'paste' ? 'paste' : tr.getMeta('jwSemanticCommand') ? 'semantic' : 'input'
         const step = tr.steps.length === 1 && tr.steps[0] instanceof ReplaceStep ? tr.steps[0] : null
         const slash = !controller.composing && kind === 'input' && step?.slice.size === 1 && step.slice.content.textBetween(0, step.slice.content.size) === '/'
@@ -110,7 +115,21 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       },
       handleDOMEvents: {
         keydown(_view, event) {
-          // ProseMirror's editing key handlers do not run in readonly mode.
+          // Readonly DOM never receives the ordinary text-editing keymap.
+          if (latest.current.readonlyContent && (event.metaKey || event.ctrlKey) && !event.altKey) {
+            const key = event.key.toLowerCase()
+            const mark = { b: 'bold', i: 'italic', u: 'underline' }[key]
+            const run = mark && !event.shiftKey ? toggleFirstTextMark(controller.state.schema.marks[mark])
+              : key === 'z' ? event.shiftKey ? redo : undo : key === 'y' && !event.shiftKey ? redo : null
+            if (run) {
+              event.preventDefault()
+              if (controller.snapshot.writable && controller.snapshot.canChangePresentation !== false) {
+                try { run(controller.state, tr => controller.dispatch(trackSemanticTransaction(controller.state, tr, { scrollIntoView: false })).catch(report)) }
+                catch (error) { report(error) }
+              }
+              return true
+            }
+          }
           if (!latest.current.readonlyContent && !latest.current.writing && latest.current.active && latest.current.ready && event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing) {
             event.preventDefault()
             latest.current.onActivate()
@@ -257,20 +276,14 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     }
     catch (error) { report(error) }
   }
-  const copySelection = async () => {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Копирование недоступно в этом браузере. Используйте Cmd/Ctrl+C.')
-      const { state } = controller
-      await navigator.clipboard.writeText(state.doc.textBetween(state.selection.from, state.selection.to, '\n', '\n'))
-    } catch (error) { report(error) }
-  }
   const state = controller?.state
   const suggestions = panel?.category && controller ? semanticSuggestions([
     ...records.filter(record => record.textId !== controller.snapshot.record?.textId),
     { userId: controller.snapshot.context.userId, semanticMarkup: getSemanticMarkup(state) },
   ], controller.snapshot.context.userId, panel.category, panel.query) : []
-  const selected = state && !state.selection.empty
-  const panelVisible = active && writing && ready && position && (panel || (selected && focused && nativeSelected !== false))
+  const selected = state && !state.selection.empty && firstTextHasMark(state, state.schema.marks.bold) !== null
+  const canChangePresentation = controller?.snapshot.canChangePresentation !== false && controller?.snapshot.writable
+  const panelVisible = canChangePresentation && active && writing && ready && position && (panel || (selected && focused && nativeSelected !== false))
   useLayoutEffect(() => {
     const element = toolbarRef.current
     const view = viewRef.current
@@ -295,20 +308,19 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       style={{ left: position.x, top: position.y }} onClick={event => event.stopPropagation()}
       onBlur={event => { if (panelRef.current?.category && !event.currentTarget.contains(event.relatedTarget)) cancelPanel() }}>
       <div className="editor-panel-row" onMouseDown={event => event.preventDefault()}>
-        {!readonlyContent && (!panel || panel.source === 'selection') ? <>
+        {(!panel || panel.source === 'selection') ? <>
           {['bold', 'italic', 'underline'].map((mark, i) => <button key={mark} aria-label={['Жирный', 'Курсив', 'Подчёркнутый'][i]}
-            aria-pressed={state.doc.rangeHasMark(state.selection.from, state.selection.to, state.schema.marks[mark])}
-            onClick={() => command(toggleMark(state.schema.marks[mark]))}>{['B', 'I', 'U'][i]}</button>)}<span aria-hidden="true">|</span>
+            aria-pressed={firstTextHasMark(state, state.schema.marks[mark]) === true}
+            onClick={() => command(toggleFirstTextMark(state.schema.marks[mark]))}>{['B', 'I', 'U'][i]}</button>)}<span aria-hidden="true">|</span>
         </> : null}
         <SemanticCategories panel={panel} chooseCategory={chooseCategory} />
-        {!panel ? <><span aria-hidden="true">|</span><button onClick={copySelection}>Copy</button></> : null}
       </div>
       <SemanticPicker panel={panel} queryInput={queryInput} suggestions={suggestions} setPanel={setPanel}
         applyValue={applyValue} cancelPanel={cancelPanel} />
     </div>, document.body) : null}
     <SemanticRail view={runtime?.view} controller={controller} active={active} writing={writing} ready={ready}
       metadataHost={metadataHost} scrollElement={scrollElement ?? runtime?.scroller} tick={tick}
-      onActivate={props.onActivate} report={report} allowChanges={!readonlyContent} allowRemoval />
+      onActivate={props.onActivate} report={report} allowChanges={!readonlyContent && canChangePresentation} allowRemoval={canChangePresentation} />
   </>
 })
 

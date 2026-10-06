@@ -90,7 +90,7 @@ export function semanticHistoryPlugin(initialMarkup = []) {
       }
       return true
     },
-    appendTransaction: (transactions, _oldState, state) => transactions.some(tr => tr.getMeta('jwSemanticCommand'))
+    appendTransaction: (transactions, _oldState, state) => transactions.some(tr => (tr.getMeta('jwSemanticCommand') || tr.getMeta('jwFormattingCommand')))
       ? closeHistory(state.tr) : null,
   })
 }

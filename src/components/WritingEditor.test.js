@@ -7,6 +7,7 @@ import { act, createElement, createRef } from 'react'
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true })
 for (const key of ['window', 'document', 'Node', 'HTMLElement', 'DOMParser', 'MutationObserver', 'getComputedStyle']) globalThis[key] = dom.window[key]
+Object.defineProperty(globalThis, 'localStorage', { value: dom.window.localStorage, configurable: true })
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.requestAnimationFrame = callback => setTimeout(callback, 0)
@@ -468,7 +469,7 @@ for (const backward of [false, true]) {
   }
 }
 
-test('shared readonly editor offers selection metadata but rejects text and formatting', async () => {
+test('shared readonly editor offers metadata and guarded formatting while rejecting text edits', async () => {
   const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
   await writer.dispatch(writer.state.tr.insertText('Архивный текст', 1))
   const original = writer.snapshot.record
@@ -482,7 +483,9 @@ test('shared readonly editor offers selection metadata but rejects text and form
       view.dom.focus()
       await archive.dispatch(archive.state.tr.setSelection(TextSelection.create(archive.state.doc, 1, 9)))
     })
-    assert.equal(document.querySelector('button[aria-label="Жирный"]'), null)
+    assert.ok(document.querySelector('button[aria-label="Жирный"]'))
+    assert.deepEqual([...document.querySelectorAll('.editor-panel-row button')].map(node => node.textContent), ['B', 'I', 'U', 'Тег', 'Название'])
+    assert.equal(button('Copy'), undefined)
     await click(button('Название'))
     await inputQuery('Офис')
     await click(button('Создать «Офис»'))
@@ -498,9 +501,23 @@ test('shared readonly editor offers selection metadata but rejects text and form
       view.dispatch(view.state.tr.insertText('bad'))
       view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true, cancelable: true }))
       view.dom.dispatchEvent(new dom.window.CompositionEvent('compositionstart', { bubbles: true }))
+      await archive.flush()
+    })
+    assert.equal(archive.snapshot.record.content, original.content)
+    assert.ok(view.dom.querySelector('strong'))
+    const formatted = structuredClone(archive.snapshot.record.document)
+    await act(async () => {
+      view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))
+      await archive.flush()
     })
     assert.deepEqual(archive.snapshot.record.document, original.document)
-    assert.equal(view.dom.querySelector('strong'), null)
+    assert.equal(getSemanticMarkup(archive.state)[0].value, 'Офис')
+    await act(async () => {
+      view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))
+      await archive.flush()
+    })
+    assert.deepEqual(archive.snapshot.record.document, formatted)
+    assert.equal(view.dom.getAttribute('contenteditable'), 'false')
   } finally { await f.close() }
 })
 
@@ -714,4 +731,82 @@ test('archive summary, native readonly selection assignment, collapse/reopen and
     assert.equal(saved.revision, original.revision + 1)
     assert.equal(getSemanticMarkup(writer.state).length, 3)
   } finally { await act(async () => root.unmount()); container.remove(); sidebar.remove() }
+})
+
+for (const [mark, label] of [['bold', 'Жирный'], ['italic', 'Курсив'], ['underline', 'Подчёркнутый']]) {
+  test(`archive ${mark} button follows first character, keeps selection and readonly DOM through persistence`, async () => {
+    const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+    await writer.dispatch(writer.state.tr.insertText(' first last ', 1))
+    await writer.dispatch(writer.state.tr.addMark(8, 12, writer.state.schema.marks[mark].create()))
+    const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+    const archive = createArchiveController(writer.snapshot.record)
+    const f = await fixture({ controller: archive, readonlyContent: true })
+    try {
+      const original = structuredClone(archive.snapshot.record)
+      await act(async () => {
+        f.ref.current.selectAll()
+        await archive.flush()
+      })
+      const selection = archive.state.selection.toJSON()
+      const tools = () => document.querySelector(`button[aria-label="${label}"]`)
+      assert.equal(tools().getAttribute('aria-pressed'), 'false')
+      await click(tools())
+      await act(async () => archive.flush())
+      assert.equal(tools().getAttribute('aria-pressed'), 'true')
+      assert.deepEqual(archive.state.selection.toJSON(), selection)
+      assert.equal(archive.snapshot.record.content, original.content)
+      assert.equal(f.ref.current.instance.dom.getAttribute('contenteditable'), 'false')
+      assert.equal(window.getSelection().toString(), original.content)
+      archive.state.doc.descendants(node => { if (node.isText) assert.ok(archive.state.schema.marks[mark].isInSet(node.marks)) })
+      await click(tools())
+      await act(async () => archive.flush())
+      assert.equal(archive.state.doc.rangeHasMark(1, archive.state.doc.content.size - 1, archive.state.schema.marks[mark]), false)
+      assert.equal(archive.snapshot.record.content, original.content)
+      await act(async () => {
+        window.getSelection().removeAllRanges()
+        document.dispatchEvent(new dom.window.Event('selectionchange'))
+      })
+      assert.equal(document.querySelector('[role=toolbar]'), null)
+    } finally { await f.close() }
+  })
+}
+
+test('one presentation capability hides editing tools but keeps saved marks and semantic labels visible', async () => {
+  const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+  await writer.dispatch(writer.state.tr.insertText('Архив', 1))
+  await writer.dispatch(writer.state.tr.addMark(1, 6, writer.state.schema.marks.bold.create()))
+  await writer.dispatch(writer.state.tr.setSelection(TextSelection.create(writer.state.doc, 1, 6)))
+  await writer.dispatch(assignSelectionMarkup(writer.state, { id: 'keep', kind: 'tag', valueId: 'keep', value: 'keep' }))
+  const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+  const archive = createArchiveController(writer.snapshot.record, { canChangePresentation: () => false })
+  const f = await fixture({ controller: archive, readonlyContent: true })
+  try {
+    await act(async () => f.ref.current.selectAll())
+    assert.equal(document.querySelector('[role=toolbar]'), null)
+    assert.ok(f.container.querySelector('strong'))
+    assert.equal(f.sidebar.querySelector('.semantic-value').textContent, '#keep')
+    assert.equal(f.sidebar.querySelector('.semantic-remove'), null)
+    const original = structuredClone(archive.snapshot.record)
+    await act(async () => f.ref.current.instance.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true, cancelable: true })))
+    assert.deepEqual(archive.snapshot.record, original)
+  } finally { await f.close() }
+})
+
+test('maintenance from another tab blocks archive formatting without changing the saved record', async () => {
+  const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+  await writer.dispatch(writer.state.tr.insertText('Архив', 1))
+  const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+  const archive = createArchiveController(writer.snapshot.record)
+  const f = await fixture({ controller: archive, readonlyContent: true })
+  const markerKey = 'just-writing-explicit-maintenance'
+  try {
+    await act(async () => f.ref.current.selectAll())
+    assert.ok(document.querySelector('[role=toolbar]'))
+    const original = structuredClone(archive.snapshot.record)
+    dom.window.localStorage.setItem(markerKey, JSON.stringify({ token: 'other-tab', owner: 'other', phase: 'maintenance' }))
+    await f.render()
+    assert.equal(document.querySelector('[role=toolbar]'), null)
+    assert.throws(() => archive.dispatch(archive.state.tr.addMark(1, 6, archive.state.schema.marks.bold.create())), /Maintenance/)
+    assert.deepEqual(archive.snapshot.record, original)
+  } finally { dom.window.localStorage.removeItem(markerKey); await f.close() }
 })
