@@ -6,14 +6,15 @@ import { writingChart, periodScale } from './domain/writingChart.js'
 import { localDayKey } from './domain/writingDay.js'
 import WritingChart from './components/WritingChart.jsx'
 import ResearchDayCell from './components/ResearchDayCell.jsx'
+import ResearchTotals from './components/ResearchTotals.jsx'
+import { createLastVerifiedBackupStore } from './backup/lastVerifiedBackup.js'
 import ResearchMonth from './components/ResearchMonth.jsx'
 
-const number = (value) => value.toLocaleString('ru-RU')
 const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 const dateLabel = (key) => new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(key + 'T12:00:00Z'))
-const plural = (n, one, few, many) => n % 100 >= 11 && n % 100 <= 14 ? many : n % 10 === 1 ? one : n % 10 >= 2 && n % 10 <= 4 ? few : many
 
 export default function Research({ userId, flush }) {
+  const [backupStore] = useState(() => createLastVerifiedBackupStore())
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(null)
@@ -27,7 +28,7 @@ export default function Research({ userId, flush }) {
       try {
         await flush()
         const snapshot = await loadResearch(userId)
-        if (!stopped && snapshot.profile) { setData({ ...researchData(snapshot, Date.now()), calendarKey: localDayKey(Date.now(), snapshot.profile.timeZone) }); setError('') }
+        if (!stopped && snapshot.profile) { setData({ ...researchData(snapshot, Date.now()), backupCount: backupStore.read() ? 1 : 0, calendarKey: localDayKey(Date.now(), snapshot.profile.timeZone) }); setError('') }
       } catch (failure) { if (!stopped) setError(failure.message) }
       finally { reading = false }
     }
@@ -56,11 +57,7 @@ export default function Research({ userId, flush }) {
     : months[Number(period.slice(5, 7)) - 1] + ' ' + year
   return <div className="research-content">
     {error ? <p role="alert">{error}</p> : null}
-    <div className="research-totals">
-      <div><strong>{number(data.writingDays)}</strong><span>{plural(data.writingDays, 'день письма', 'дня письма', 'дней письма')}</span></div>
-      <div><strong>{number(data.totalWords)}</strong><span>слов</span></div>
-      <div><strong>{number(data.streak)}</strong><span>{plural(data.streak, 'день подряд', 'дня подряд', 'дней подряд')}</span></div>
-    </div>
+    <ResearchTotals data={data} backupCount={data.backupCount} />
     <nav className="research-time" aria-label="Выбор даты">
       <div className="research-time-row" role="group" aria-label="Годы"><div>{years.map((value) => <button key={value} aria-pressed={value === year} onClick={() => setSelected(value)}>{value}</button>)}</div></div>
       <div className="research-time-row" role="group" aria-label="Месяцы"><div>{months.slice(0, monthCount).map((label, i) => {
@@ -76,7 +73,7 @@ export default function Research({ userId, flush }) {
     </nav>
     <section className="research-day">
       <h1>{heading} {key === data.currentKey ? <small>сегодня</small> : null}</h1>
-      <p>{scale === 'day' && !entry ? 'Текста нет' : `${number(periodWords)} слов`}</p>
+      <p>{scale === 'day' && !entry ? 'Текста нет' : `${periodWords.toLocaleString('ru-RU')} слов`}</p>
       <h2>Темп письма</h2>
       <WritingChart chart={chart} />
     </section>

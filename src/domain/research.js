@@ -10,9 +10,15 @@ export function shiftDate(key, delta) {
 export function researchData({ texts, days, samples, profile }, now) {
   const byId = new Map(days.map((day) => [day.userDayId, day]))
   const entries = new Map()
+  const tags = new Set(), titles = new Set()
   for (const text of texts) {
     const day = byId.get(text.userDayId)
     if (!day || day.userId !== text.userId) continue
+    for (const item of text.semanticMarkup ?? []) {
+      if (typeof item.value !== 'string' || !item.value.trim()) continue
+      if (item.kind === 'tag') tags.add(item.value)
+      if (item.kind === 'title') titles.add(item.value)
+    }
     entries.set(day.dayKey, { day, text, words: getWordCount(text.content) })
   }
   const calendar = calculateUserDay({ ...profile, now })
@@ -27,7 +33,7 @@ export function researchData({ texts, days, samples, profile }, now) {
   const sortedSamples = samples.filter((point) => byId.has(point.userDayId) && byId.get(point.userDayId).userId === point.userId)
     .slice().sort((a, b) => a.timestamp - b.timestamp)
   return {
-    entries, currentKey, streak, writingDays: entries.size,
+    entries, currentKey, streak, writingDays: entries.size, tagCount: tags.size, titleCount: titles.size,
     totalWords: [...entries.values()].reduce((sum, entry) => sum + entry.words, 0),
     samples: sortedSamples,
   }

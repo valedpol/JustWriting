@@ -44,3 +44,31 @@ test('samples are sorted without removing equal counts or reconstructing missing
   assert.deepEqual(result.samples.map((s) => [s.timestamp, s.wordCount]), [[10, 2], [20, 2], [30, 1]])
   assert.deepEqual(researchData(snapshot(['2026-12-31']), now).samples, [])
 })
+
+
+test('semantic totals count distinct saved values across texts, separately by kind', () => {
+  const data = snapshot(['2026-12-30', '2026-12-31'])
+  data.texts[0].semanticMarkup = [
+    { id: 'a', kind: 'tag', value: 'Мысли' }, { id: 'b', kind: 'tag', value: 'Мысли' },
+    { kind: 'title', value: 'Утро' }, { kind: 'title', value: 'Мысли' },
+  ]
+  data.texts[1].semanticMarkup = [
+    { id: 'c', kind: 'tag', value: 'Мысли', valueId: 'different-id' },
+    { kind: 'tag', value: 'Работа', source: 'slash', range: null },
+    { kind: 'title', value: 'Утро' }, { kind: 'title', value: 'Вечер' },
+    { kind: 'tag', value: '' }, { kind: 'title' }, { kind: 'other', value: 'Ignore' },
+  ]
+  data.texts.push({ userId: 'other', userDayId: '2026-12-31', semanticMarkup: [{ kind: 'tag', value: 'Foreign' }] })
+  data.texts.push({ userId: 'u', userDayId: 'missing', semanticMarkup: [{ kind: 'title', value: 'Orphan' }] })
+  const result = researchData(data, now)
+  assert.equal(result.tagCount, 2)
+  assert.equal(result.titleCount, 3)
+  assert.equal(result.writingDays, 2)
+  assert.equal(result.totalWords, 4)
+})
+
+test('legacy texts without semantic markup have zero semantic totals', () => {
+  const data = snapshot(['2026-12-31'])
+  assert.equal(researchData(data, now).tagCount, 0)
+  assert.equal(researchData(data, now).titleCount, 0)
+})
