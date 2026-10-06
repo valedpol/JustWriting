@@ -39,6 +39,7 @@ function App() {
   useEffect(() => { rememberSection(section) }, [section])
   const isToday = section === 'today'
   const [archiveWords, setArchiveWords] = useState(null)
+  const [archiveNavigationHost, setArchiveNavigationHost] = useState(null)
   const [archiveMetadataHost, setArchiveMetadataHost] = useState(null)
   const [settingsStatusHost, setSettingsStatusHost] = useState(null)
   const [backupActive, setBackupActive] = useState(false)
@@ -197,7 +198,7 @@ function App() {
             </p>
           </div>
 
-          {section === 'research' ? <ResearchNavigation onExit={() => openSection('today')} /> : <nav className="side-menu" aria-label="Главное меню">
+          {section === 'research' ? <ResearchNavigation onExit={() => openSection('today')} /> : section === 'archive' ? <div ref={setArchiveNavigationHost} className="archive-navigation-slot" /> : <nav className="side-menu" aria-label="Главное меню">
             <button type="button" className={`menu-item${section === 'archive' ? ' is-active' : ''}`} aria-current={section === 'archive' ? 'page' : undefined} onClick={() => openSection('archive')}>
               Мои тексты
             </button>
@@ -226,7 +227,7 @@ function App() {
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
           {section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
-            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <MyTexts userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} /> : null}
+            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <MyTexts navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} /> : null}
         </section>
 
         <aside className="right-sidebar" ref={setArchiveMetadataHost} />

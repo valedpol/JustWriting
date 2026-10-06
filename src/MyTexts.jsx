@@ -1,6 +1,6 @@
 import ArchiveWritingEntry from './components/ArchiveWritingEntry.jsx'
 import ReadonlySemanticMarkup from './components/ReadonlySemanticMarkup.js'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { listTexts } from './storage/textRepository'
 import { getWordCount } from './domain/wordCount'
@@ -8,6 +8,8 @@ import { archiveDateTop, collapseAnchor } from './domain/archiveViewport.js'
 import ArchiveCalendar from './components/ArchiveCalendar.jsx'
 import { periodLabel } from './domain/calendarPeriod.js'
 import { filterArchivePeriod, archiveCalendarEntries } from './domain/archivePeriod.js'
+import { archiveSearch } from './domain/archiveSearch.js'
+import MyTextsNavigation from './components/MyTextsNavigation.jsx'
 import './MyTexts.css'
 
 function ArchiveRailHost({ textId, register, onActive }) {
@@ -19,7 +21,7 @@ function dateLabel(key) {
   return key.split('-').reverse().join('.')
 }
 
-export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved }) {
+export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit }) {
   const [records, setRecords] = useState(null)
   const [expanded, setExpanded] = useState(() => new Set())
   const [failed, setFailed] = useState(false)
@@ -29,7 +31,15 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   const [periodError, setPeriodError] = useState('')
   const periodChange = useRef(false)
   const resetResults = useRef(false)
-  const visibleRecords = records ? filterArchivePeriod(records, period) : null
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [draftQuery, setDraftQuery] = useState('')
+  const [activeQuery, setActiveQuery] = useState('')
+  const [activeSearchId, setActiveSearchId] = useState(null)
+  const [locateRequest, setLocateRequest] = useState(null)
+  const searchResults = useMemo(() => records && activeQuery ? archiveSearch(filterArchivePeriod(records, period), activeQuery) : null, [records, period, activeQuery])
+  const visibleRecords = searchResults?.records ?? (records ? filterArchivePeriod(records, period) : null)
+  const effectiveActiveSearchId = searchResults?.occurrences.some(item => item.id === activeSearchId) ? activeSearchId : searchResults?.occurrences[0]?.id ?? null
+  const activeIndex = searchResults?.occurrences.findIndex(item => item.id === effectiveActiveSearchId) ?? -1
   const [metadataLayout, setMetadataLayout] = useState(null)
   const [railHosts, setRailHosts] = useState({})
   const registerHost = useCallback((id, node) => setRailHosts(previous => previous[id] === node ? previous : { ...previous, [id]: node }), [])
@@ -83,7 +93,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       positioned.current = true
       return
     }
-    const visibleRecords = records ? filterArchivePeriod(records, period) : null
+    const visibleRecords = activeQuery ? archiveSearch(filterArchivePeriod(records ?? [], period), activeQuery).records : records ? filterArchivePeriod(records, period) : null
     if (!visibleRecords?.length) return
     const anchor = pendingCollapse.current
     pendingCollapse.current = null
@@ -129,7 +139,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       area.scrollTop += item.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 3
       positioned.current = true
     }
-  }, [records, expanded, period])
+  }, [records, expanded, period, activeQuery])
 
   useLayoutEffect(() => {
     const area = scrollArea.current
@@ -161,32 +171,76 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       window.removeEventListener('resize', alignMetadata)
       observer.disconnect()
     }
-  }, [records, expanded, metadataHost, period, calendarOpen])
+  }, [records, expanded, metadataHost, period, calendarOpen, activeQuery])
 
-  const changePeriod = async nextPeriod => {
-    if (periodChange.current || nextPeriod === period) return
+  const changeCriteria = async (nextPeriod, nextQuery) => {
+    if (periodChange.current) return
     periodChange.current = true
     setChangingPeriod(true)
     setPeriodError('')
     try {
-      const retained = new Set(filterArchivePeriod(records, nextPeriod).map(record => record.textId))
+      // Drain every open editor first, then read current records: markup saves
+      // may have changed which records match while the queue was pending.
+      await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+      const fresh = [...await listTexts(userId)].sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+      const candidates = filterArchivePeriod(fresh, nextPeriod)
+      const result = nextQuery ? archiveSearch(candidates, nextQuery) : null
+      const retained = new Set((result?.records ?? candidates).map(record => record.textId))
       const disappearing = visibleRecords.filter(record => !retained.has(record.textId))
-      await Promise.all(disappearing.map(record => editors.current.get(record.textId)?.flush()))
       const selection = window.getSelection()
       if (selection?.rangeCount && disappearing.some(record => {
         const node = Array.from(scrollArea.current.querySelectorAll('[data-text-id]')).find(item => item.dataset.textId === record.textId)
         return node && selection.getRangeAt(0).intersectsNode(node)
       })) selection.removeAllRanges()
-      setExpanded(previous => new Set([...previous].filter(id => retained.has(id))))
+      setExpanded(previous => result ? retained : new Set([...previous].filter(id => retained.has(id))))
       pendingExpansion.current = null
       pendingCollapse.current = null
       if (!retained.has(activeRecord.current)) activeRecord.current = null
       resetResults.current = true
       setHasOpened(true)
+      setRecords(fresh)
       setPeriod(nextPeriod)
-    } catch (error) { setPeriodError(error.message || 'Не удалось завершить сохранение. Период не изменён.') }
+      setActiveQuery(nextQuery)
+      const first = result?.occurrences[0]?.id ?? null
+      setActiveSearchId(first)
+      setLocateRequest(first ? { id: first } : null)
+    } catch (error) { setPeriodError(error.message || 'Не удалось завершить сохранение. Критерии не изменены.') }
     finally { periodChange.current = false; setChangingPeriod(false) }
   }
+  const changePeriod = nextPeriod => {
+    if (nextPeriod !== period) return changeCriteria(nextPeriod, activeQuery)
+  }
+  const locateOccurrence = index => {
+    const item = searchResults?.occurrences[index]
+    if (!item) return
+    pendingExpansion.current = null
+    pendingCollapse.current = null
+    setExpanded(previous => new Set([...previous, item.textId]))
+    setActiveSearchId(item.id)
+    setLocateRequest({ id: item.id })
+  }
+
+  useLayoutEffect(() => {
+    if (!locateRequest) return
+    const occurrence = searchResults?.occurrences.find(item => item.id === locateRequest.id)
+    if (!occurrence) return
+    const find = () => [...document.querySelectorAll('[data-search-occurrence]')].find(node => node.dataset.searchOccurrence === occurrence.id)
+    const reveal = () => {
+      const element = find()
+      if (!element || !scrollArea.current) return false
+      const bounds = element.getBoundingClientRect()
+      const area = scrollArea.current
+      const viewport = area.getBoundingClientRect()
+      area.scrollTop += bounds.top - viewport.top - area.clientHeight / 3
+      setLocateRequest(null)
+      return true
+    }
+    if (reveal()) return
+    // Semantic rails mount through portals after the EditorView is ready.
+    const observer = new MutationObserver(() => { if (reveal()) observer.disconnect() })
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [locateRequest, records, expanded, activeQuery, period, searchResults?.occurrences])
 
   const toggleRecord = (record) => {
     const opening = !expanded.has(record.textId)
@@ -219,11 +273,15 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     editors.current.get(record.textId)?.toggleSelection()
   }
 
-  return <><div className="editor-shell my-texts">
+  const navigation = <MyTextsNavigation onExit={onExit} searchOpen={searchOpen} onSearchOpen={setSearchOpen}
+    draft={draftQuery} onDraft={setDraftQuery} onSubmit={() => changeCriteria(period, draftQuery.trim())}
+    results={searchResults} activeIndex={activeIndex} onLocate={locateOccurrence} busy={changingPeriod || !records} />
+  return <>{navigationHost ? createPortal(navigation, navigationHost) : navigation}<div className="editor-shell my-texts">
     {records ? <div className="archive-calendar-controls">
       <div className="archive-calendar-heading">
       <button type="button" aria-expanded={calendarOpen} aria-controls="archive-calendar" onClick={() => setCalendarOpen(open => !open)}>Календарь</button>
       {period ? <span className="archive-period">{periodLabel(period)} <button type="button" aria-label="Снять выбранный период" disabled={changingPeriod} onClick={() => changePeriod(null)}>×</button></span> : null}
+      {activeQuery ? <span className="archive-period archive-search-criterion"><span title={activeQuery}>Поиск: {activeQuery}</span> <button type="button" aria-label="Снять поиск" disabled={changingPeriod} onClick={() => changeCriteria(period, '')}>×</button></span> : null}
       </div>
       {periodError ? <p role="alert">{periodError}</p> : null}
       {calendarOpen ? <fieldset id="archive-calendar" disabled={changingPeriod}>
@@ -252,11 +310,12 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
               </div>
               <div className="saved-text" aria-label="Сохранённый текст, только для чтения">
                 <ArchiveWritingEntry ref={editor => { if (editor) editors.current.set(record.textId, editor); else editors.current.delete(record.textId) }}
+                  searchOccurrences={searchResults?.occurrences.filter(item => item.textId === record.textId)} activeSearchId={effectiveActiveSearchId}
                   record={record} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
               </div>
             </> : null}
           </li>)}
-        </ul> : <p>{period ? 'В выбранном периоде текстов нет.' : 'Сохранённых текстов пока нет.'}</p>}
+        </ul> : <p>{activeQuery ? 'Совпадений нет.' : period ? 'В выбранном периоде текстов нет.' : 'Сохранённых текстов пока нет.'}</p>}
     </div>
   </div>
     {metadataHost && metadataLayout && records ? createPortal(

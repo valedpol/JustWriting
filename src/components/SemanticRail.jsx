@@ -1,12 +1,13 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { focusView } from '../editor/focusView.js'
+import SearchHighlights from './SearchHighlights.jsx'
 import { TextSelection } from '@tiptap/pm/state'
 import { getSemanticMarkup, removeSemanticMarkup, setSemanticRange } from '../editor/semanticHistory.js'
 
 const labels = { tag: 'Тег', title: 'Название' }
 
-export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges }) {
+export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges, searchOccurrences = [], activeSearchId }) {
   const railRef = useRef(null)
   const [rail, setRail] = useState([])
   const state = controller?.state
@@ -61,7 +62,7 @@ export default function SemanticRail({ view, controller, active, writing, ready,
             const from = item.range?.from ?? item.anchor; const to = item.range?.to ?? item.anchor
             controller.dispatch(state.tr.setSelection(TextSelection.create(state.doc, from, to)), 'selection').catch(report)
             if (allowChanges) view.focus(); else focusView(view)
-          }}>{item.kind === 'tag' ? '#' : ''}{item.value}</button>
+          }}>{item.kind === 'tag' ? '#' : ''}<SearchHighlights value={item.value} occurrences={searchOccurrences.filter(match => match.markupId === item.id)} activeId={activeSearchId} /></button>
         {allowChanges && writing && ready && !item.range ? <button className="semantic-boundary" title={`Поставьте курсор ${item.direction === 'forward' ? 'после' : 'перед'} смысловой точкой и нажмите эту кнопку`}
           disabled={!state.selection.empty || (item.direction === 'forward' ? state.selection.from <= item.anchor : state.selection.from >= item.anchor)}
           onMouseDown={event => event.preventDefault()} onClick={event => {

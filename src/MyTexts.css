@@ -94,3 +94,25 @@
 .archive-period button { font: inherit; line-height: 20px; }
 .archive-calendar-controls fieldset { min-width: 0; margin: 12px 0 0; border: 0; padding: 0; }
 .archive-calendar-controls button:disabled { opacity: .4; cursor: default; }
+
+.archive-search-match { background: var(--search-match-passive, #fff8e3); color: inherit; }
+.archive-search-match.is-current { background: var(--search-match-active, #ffd76a); }
+.archive-search-form { display: flex; width: 100%; min-width: 0; border-bottom: 1px solid #bbb; }
+.archive-search-form input { width: 0; flex: 1; min-width: 0; border: 0; background: transparent; padding: 7px 8px; color: inherit; font: inherit; outline: none; }
+.archive-search-form button, .archive-search-paging button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.archive-search-form button { display: flex; align-items: center; justify-content: center; padding: 4px 8px; min-width: 36px; min-height: 32px; }
+.archive-search-form:focus-within { border-bottom-color: #555; }
+.archive-search-form button:focus-visible, .archive-search-paging button:focus-visible { outline: 1px solid #777; outline-offset: 2px; }
+.archive-search-paging button { min-width: 36px; min-height: 32px; padding: 4px 8px; font-size: 22px; line-height: 24px; }
+.archive-search-summary { font-size: .85rem; width: 100%; }
+.archive-search-summary p { margin: 12px 0; }
+.archive-search-summary dl { margin: 0; }
+.archive-search-summary dl > div { display: flex; justify-content: space-between; gap: 12px; }
+.archive-search-summary dd { margin: 0; }
+.archive-search-paging { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px; }
+.archive-search-paging button:disabled { opacity: .4; cursor: default; }
+.archive-navigation-slot { min-width: 0; }
+.my-texts-local-menu .research-local-children { min-width: 0; }
+.archive-search-criterion { min-width: 0; max-width: 45%; }
+.archive-search-criterion > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archive-search-criterion button { flex-shrink: 0; }

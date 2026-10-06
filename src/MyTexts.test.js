@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
 
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true, url: 'https://archive.test' })
-for (const key of ['window', 'document', 'HTMLElement', 'getComputedStyle']) globalThis[key] = dom.window[key]
+for (const key of ['window', 'document', 'HTMLElement', 'getComputedStyle', 'MutationObserver']) globalThis[key] = dom.window[key]
 globalThis.ResizeObserver = class { observe() {} disconnect() {} }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 Object.defineProperty(globalThis, 'indexedDB', { configurable: true, get() { throw new Error('IndexedDB forbidden in calendar test') } })
@@ -124,4 +124,41 @@ test('calendar active period and has-data indicators occupy separate levels', ()
   assert.ok(parseFloat(active.bottom) > parseFloat(marker.bottom) + parseFloat(marker.height), 'active line is above data marker with a gap')
   assert.equal(rule('.research-time .research-day-button').gap, '7px')
   assert.equal(rule('.research-time .research-day-button[aria-pressed="true"] .research-day-number').getPropertyValue('text-underline-offset'), '3px')
+})
+
+test('explicit search waits for pending save before excluding a selected editor; failed save keeps previous feed', async () => {
+  const container = document.createElement('div'), sidebar = document.createElement('aside')
+  document.body.append(container, sidebar)
+  const root = createRoot(container)
+  let resolve
+  flushEditor = () => new Promise(done => { resolve = done })
+  const click = async node => act(async () => node.click())
+  const type = async value => act(async () => {
+    const input = container.querySelector('[aria-label="Поиск по архиву"]')
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, value)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  })
+  const ids = () => [...container.querySelectorAll('[data-text-id]')].map(node => node.dataset.textId)
+  try {
+    await act(async () => root.render(createElement(MyTexts, { userId: 'u', flush: async () => {}, onTotalWords() {}, metadataHost: sidebar })))
+    await click(container.querySelector('[data-text-id=c] button'))
+    const range = document.createRange(); range.selectNodeContents(container.querySelector('.test-open-editor span'))
+    window.getSelection().removeAllRanges(); window.getSelection().addRange(range)
+    await click([...container.querySelectorAll('button')].find(node => node.textContent === 'Поиск'))
+    await type('Первый')
+    await click(container.querySelector('[aria-label="Найти"]'))
+    assert.deepEqual(ids(), ['a', 'b', 'c'])
+    assert.equal(container.querySelector('[aria-label="Найти"]').disabled, true)
+    await act(async () => resolve())
+    assert.deepEqual(ids(), ['a'])
+    assert.equal(window.getSelection().rangeCount, 0)
+    assert.equal(container.querySelectorAll('.test-open-editor').length, 1)
+    assert.match(container.querySelector('.archive-search-summary').textContent, /1 вхождение · 1 текст/)
+    flushEditor = async () => { throw new Error('search save failed') }
+    await type('Второй')
+    await click(container.querySelector('[aria-label="Найти"]'))
+    assert.deepEqual(ids(), ['a'])
+    assert.match(container.querySelector('.archive-search-criterion').textContent, /Первый/)
+    assert.equal(container.querySelector('[role=alert]').textContent, 'search save failed')
+  } finally { await act(async () => root.unmount()); flushEditor = async () => {}; container.remove(); sidebar.remove() }
 })

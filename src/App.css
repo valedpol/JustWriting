@@ -446,6 +446,8 @@
 .screen-interface .research-local-menu .menu-item { margin-top: 0; }
 .screen-interface .research-local-menu .research-local-exit { margin-top: calc(var(--navigation-group-gap) - var(--navigation-item-gap)); }
 
+.screen-interface .my-texts-local-menu .my-texts-publications { margin-top: calc(var(--navigation-group-gap) - var(--navigation-item-gap)); }
+
 /* Interaction cues do not change the layout or resting appearance. */
 .app-shell :is(button, select, [role="button"]):not(:disabled):not([aria-disabled="true"]),
 .app-shell a[href],

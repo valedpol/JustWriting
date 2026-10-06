@@ -14,6 +14,7 @@ import { listTexts } from '../storage/textRepository.js'
 import { semanticSuggestions } from '../editor/semanticSuggestions.js'
 import SemanticRail from './SemanticRail.jsx'
 import SemanticPicker, { SemanticCategories } from './SemanticPicker.jsx'
+import { searchDecorations } from '../editor/searchDecorations.js'
 import './WritingEditor.css'
 
 const WritingEditor = forwardRef(function WritingEditor(props, ref) {
@@ -98,6 +99,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       state: controller.state,
       editable: () => !latest.current.readonlyContent && latest.current.ready && latest.current.active && latest.current.writing && !panelRef.current?.category,
       attributes: { role: 'textbox', 'aria-label': 'Текстовый редактор', 'aria-multiline': 'true', spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off', 'data-placeholder': 'Пиши просто. Просто пиши.', ...(readonlyContent ? { 'aria-readonly': 'true', tabindex: '0' } : {}) },
+      decorations: state => searchDecorations(state.doc, latest.current.searchOccurrences, latest.current.activeSearchId),
       transformPastedHTML: cleanPaste,
       dispatchTransaction(tr) {
         if (panelRef.current?.category) return
@@ -274,6 +276,11 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     viewRef.current?.setProps({ editable: () => !readonlyContent && ready && active && writing && !panelRef.current?.category })
   }, [active, writing, ready, categoryOpen, readonlyContent])
 
+  useLayoutEffect(() => {
+    const view = viewRef.current
+    if (view && readonlyContent) view.setProps({ decorations: state => searchDecorations(state.doc, latest.current.searchOccurrences, latest.current.activeSearchId) })
+  }, [props.searchOccurrences, props.activeSearchId, readonlyContent])
+
   useEffect(() => {
     if (!panelOpen || !controller) return
     let cancelled = false
@@ -376,6 +383,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     </div>, document.body) : null}
     <SemanticRail view={runtime?.view} controller={controller} active={active} writing={writing} ready={ready}
       metadataHost={metadataHost} scrollElement={scrollElement ?? runtime?.scroller} tick={tick}
+      searchOccurrences={props.searchOccurrences} activeSearchId={props.activeSearchId}
       onActivate={props.onActivate} report={report} allowChanges={!readonlyContent && canChangePresentation} allowRemoval={canChangePresentation} />
   </>
 })

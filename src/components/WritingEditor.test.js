@@ -101,7 +101,7 @@ async function fixture(options = {}) {
   const ref = createRef()
   const root = createRoot(container)
   const render = async (writing = true, active = true) => act(async () => {
-    root.render(createElement(WritingEditor, { ref, controller, writing, active, ready: true, metadataHost: sidebar, onActivate() {}, readonlyContent: options.readonlyContent ?? false }))
+    root.render(createElement(WritingEditor, { ref, controller, writing, active, ready: true, metadataHost: sidebar, searchOccurrences: options.searchOccurrences, activeSearchId: options.activeSearchId, onActivate() {}, readonlyContent: options.readonlyContent ?? false }))
   })
   await render()
   return { controller, container, sidebar, ref, render, async close() { await act(async () => root.unmount()); container.remove(); sidebar.remove() } }
@@ -663,12 +663,26 @@ test('main JW screen enters writing, keeps the editor across standard/wide and o
     await click(button('Мои тексты'))
     await settle(() => container.querySelector('.text-preview'))
     assert.equal(container.querySelector('.today-editor-shell').hidden, true)
+    const localNavigation = container.querySelector('nav[aria-label="Мои тексты"]')
+    assert.ok(localNavigation)
+    assert.equal(localNavigation.querySelector('span.menu-item').textContent, 'Мои тексты')
+    assert.equal(container.querySelector('nav[aria-label="Главное меню"]'), null)
+    assert.deepEqual([...localNavigation.querySelectorAll('button')].map(node => node.textContent.trim()), ['Поиск', 'Названия', 'Теги', 'Публикации', '←'])
+    for (const tool of localNavigation.querySelectorAll('.research-local-children button:disabled')) {
+      assert.equal(tool.disabled, true)
+      await click(tool)
+      assert.equal(container.querySelector('nav[aria-label="Мои тексты"]'), localNavigation)
+    }
+    assert.ok(localNavigation.querySelector('.my-texts-publications'))
+    assert.ok(container.querySelector('.archive-calendar-heading'), 'calendar remains in the archive at its existing location')
     await click(container.querySelector('.text-preview').closest('button'))
     await settle(() => container.querySelector('.saved-text strong'))
     assert.equal(container.querySelector('.saved-text strong').textContent, 'А')
     assert.equal(container.querySelector('.saved-text [contenteditable=true]'), null)
     assert.ok(container.querySelector('.saved-text [contenteditable=false]'))
-    await click(button('Текст сегодня'))
+    await click(container.querySelector('[aria-label="Выйти из Моих текстов к Тексту сегодня"]'))
+    assert.equal(container.querySelector('nav[aria-label="Мои тексты"]'), null)
+    assert.ok(container.querySelector('nav[aria-label="Главное меню"]'))
     assert.equal(container.querySelector('.ProseMirror'), editor)
     assert.equal(editor.getAttribute('contenteditable'), 'false')
   } finally { await act(async () => root.unmount()); container.remove() }
@@ -933,4 +947,172 @@ test('keyboard selection needs no pointer release; cancel, blur and unmount end 
   } finally { await f.close() }
   await act(async () => { document.dispatchEvent(pointerEvent('pointerup')); await new Promise(resolve => setTimeout(resolve, 5)) })
   assert.equal(document.querySelector('[role=toolbar]'), null)
+})
+
+test('archive explicit search filters all entities, decorates without writes, preserves navigation state and reveals individual occurrences', async () => {
+  const { default: MyTexts } = await server.ssrLoadModule('/src/MyTexts.jsx')
+  const { transaction } = await server.ssrLoadModule('/src/storage/database.js')
+  const { archiveDocument } = await server.ssrLoadModule('/src/editor/archiveDocument.js')
+  const userId = crypto.randomUUID()
+  const rows = ['Ёж и ЁЖ', 'Другой день', 'Без совпадений'].map((content, index) => ({
+    userId, textId: crypto.randomUUID(), dayKey: ['2026-09-26', '2026-10-03', '2026-10-04'][index], content, revision: 1,
+    contentFormat: 'tiptap-json', contentVersion: 1, document: archiveDocument({ content }),
+    semanticMarkup: index === 2 ? [] : (index === 0 ? ['title', 'tag'] : ['tag']).map((kind, i) => ({
+      id: `${index}-${i}`, valueId: `${index}-${i}`, value: 'ёж', kind, source: 'selection',
+      direction: kind === 'title' ? 'forward' : 'backward', anchor: 1, range: { from: 1, to: 3 },
+    })),
+  }))
+  await transaction(['texts'], 'readwrite', tx => rows.forEach(row => tx.objectStore('texts').add(row)))
+  const snapshot = () => transaction(['settings', 'texts', 'userDays', 'wordCountSamples'], 'readonly', (tx, done) => {
+    const data = {}
+    for (const name of ['settings', 'texts', 'userDays', 'wordCountSamples']) {
+      const read = tx.objectStore(name).getAll(); read.onsuccess = () => { data[name] = read.result }
+    }
+    done(data)
+  })
+  const before = await snapshot()
+  const container = document.createElement('div'), sidebar = document.createElement('aside'), navigation = document.createElement('aside')
+  document.body.append(container, sidebar, navigation)
+  const root = createRoot(container)
+  const props = { userId, flush: async () => {}, onTotalWords() {}, metadataHost: sidebar, navigationHost: navigation }
+  const settle = async predicate => {
+    for (let i = 0; i < 80 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)))
+    assert.ok(predicate(), `search UI should settle: ${navigation.textContent}; ${container.textContent}`)
+  }
+  const input = () => navigation.querySelector('input')
+  const type = async value => act(async () => {
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input(), value)
+    input().dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  })
+  const submit = async () => {
+    await act(async () => {
+      input().dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      // JSDOM does not synthesize the browser's implicit form submission.
+      navigation.querySelector('form').requestSubmit()
+    })
+    await settle(() => !navigation.querySelector('[aria-label="Найти"]').disabled)
+  }
+  const summary = () => navigation.querySelector('.archive-search-summary')
+  const entries = () => [...container.querySelectorAll('li[data-text-id]')]
+  const openCount = () => container.querySelectorAll('.saved-text').length
+  const active = () => [...document.querySelectorAll('.archive-search-match.is-current')]
+  try {
+    await act(async () => root.render(createElement(MyTexts, props)))
+    await settle(() => entries().length === 3)
+    await click(button('Поиск'))
+    assert.equal(button('Названия'), undefined)
+    await type('ЕЖ')
+    assert.equal(entries().length, 3)
+    assert.equal(summary(), null)
+    await submit()
+    await settle(() => active().length > 0)
+    assert.match(summary().textContent, /5 вхождений · 2 текста/)
+    assert.deepEqual([...summary().querySelectorAll('dd')].map(node => node.textContent), ['2', '1', '2'])
+    assert.equal(openCount(), 2)
+    assert.equal(document.querySelectorAll('.archive-search-match').length, 5)
+    assert.equal(document.querySelector('[role=toolbar]'), null, 'search does not create user selection')
+    assert.equal(navigation.querySelector('[aria-label="Предыдущее вхождение"]').disabled, true)
+    const firstId = active()[0].dataset.searchOccurrence
+    await type('другой')
+    assert.match(summary().textContent, /5 вхождений/)
+    assert.equal(entries().length, 2)
+    assert.equal(button('‹ Поиск'), undefined)
+    assert.equal(button('Поиск'), undefined, 'active heading is not a second return control')
+    assert.equal(navigation.querySelector('.menu-item.is-active').textContent, 'Поиск')
+    assert.match(container.querySelector('.archive-search-criterion').textContent, /ЕЖ/)
+    assert.equal(input().value, 'другой')
+    assert.equal(active()[0].dataset.searchOccurrence, firstId)
+    // Manual collapse is independent of results; navigation reveals only target.
+    await click(sidebar.querySelector('.archive-actions button'))
+    assert.equal(openCount(), 0)
+    assert.match(summary().textContent, /5 вхождений/)
+    await click(navigation.querySelector('[aria-label="Следующее вхождение"]'))
+    await settle(() => active().length > 0)
+    assert.equal(openCount(), 1)
+    assert.equal(entries()[1].querySelector('.saved-text'), null)
+    for (let i = 0; i < 3; i++) await click(navigation.querySelector('[aria-label="Следующее вхождение"]'))
+    await settle(() => active().length > 0 && openCount() === 2)
+    assert.equal(navigation.querySelector('[aria-label="Следующее вхождение"]').disabled, true)
+    assert.ok(sidebar.querySelector('.semantic-value .is-current'), 'metadata-only record is a navigable result')
+    const lastId = active()[0].dataset.searchOccurrence
+    await click(navigation.querySelector('[aria-label="Предыдущее вхождение"]'))
+    assert.notEqual(active()[0].dataset.searchOccurrence, lastId)
+    await click(navigation.querySelector('[aria-label="Следующее вхождение"]'))
+    assert.equal(active()[0].dataset.searchOccurrence, lastId)
+    await click(entries()[1].querySelector('.archive-record-header'))
+    assert.equal(openCount(), 1)
+    await click(entries()[1].querySelector('.archive-preview-button'))
+    await settle(() => active().some(node => node.dataset.searchOccurrence === lastId))
+    // Period changes retain executed query, not edited draft, and full markers.
+    await click(container.querySelector('[aria-controls="archive-calendar"]'))
+    const september = [...container.querySelectorAll('[aria-label="Месяцы"] button')].find(node => node.textContent === 'Сентябрь')
+    await click(september)
+    await settle(() => entries().length === 1)
+    assert.match(summary().textContent, /4 вхождения · 1 текст/)
+    assert.equal(input().value, 'другой')
+    const october = [...container.querySelectorAll('[aria-label="Месяцы"] button')].find(node => node.textContent === 'Октябрь')
+    assert.ok(october.querySelector('.research-month-mark'), 'calendar data is not filtered by search')
+    await click(container.querySelector('[aria-label="Снять выбранный период"]'))
+    await settle(() => entries().length === 2)
+    // Existing selection/panel must go away when the next result excludes it.
+    await click(sidebar.querySelector(`[data-archive-date="${rows[0].textId}"]`))
+    assert.ok(document.querySelector('[role=toolbar]'))
+    await type('нет такого запроса')
+    await submit()
+    assert.equal(entries().length, 0)
+    assert.match(summary().textContent, /0 вхождений · 0 текстов/)
+    assert.equal(active().length, 0)
+    assert.equal(document.querySelector('[role=toolbar]'), null)
+    assert.ok(window.getSelection().isCollapsed)
+    assert.equal(navigation.querySelector('.archive-search-paging'), null)
+    await type('ЕЖ')
+    await click(navigation.querySelector('[aria-label="Найти"]'))
+    await settle(() => entries().length === 2)
+    await click(container.querySelector('[aria-label="Снять поиск"]'))
+    await settle(() => entries().length === 3)
+    assert.equal(document.querySelector('.archive-search-match'), null)
+    await type('ЕЖ'); await submit()
+    await type(''); await submit()
+    assert.equal(entries().length, 3)
+    assert.equal(container.querySelector('.archive-search-criterion'), null)
+    await type('ЕЖ'); await submit()
+    await act(async () => root.render(null))
+    await act(async () => root.render(createElement(MyTexts, props)))
+    await settle(() => entries().length === 3)
+    assert.equal(navigation.querySelector('input'), null)
+    assert.equal(container.querySelector('.archive-search-criterion'), null)
+    assert.deepEqual(await snapshot(), before, 'search, highlights, navigation and collapse never write any store')
+  } finally { await act(async () => root.unmount()); container.remove(); sidebar.remove(); navigation.remove() }
+})
+
+test('search decorations coexist with readonly B/I/U, Undo/redo and semantic actions without becoming saved marks', async () => {
+  const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+  await writer.dispatch(writer.state.tr.insertText('Ёж и ёж', 1))
+  const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+  const { archiveSearch } = await server.ssrLoadModule('/src/domain/archiveSearch.js')
+  const archive = createArchiveController(writer.snapshot.record)
+  const occurrences = archiveSearch([writer.snapshot.record], 'еж').occurrences
+  const f = await fixture({ controller: archive, readonlyContent: true, searchOccurrences: occurrences, activeSearchId: occurrences[0].id })
+  try {
+    assert.equal(f.container.querySelectorAll('.archive-search-match').length, 2)
+    assert.equal(f.container.querySelectorAll('.archive-search-match.is-current').length, 1)
+    await act(async () => f.ref.current.selectAll())
+    for (const label of ['Жирный', 'Курсив', 'Подчёркнутый']) {
+      await click(document.querySelector(`[aria-label="${label}"]`))
+      await act(async () => archive.flush())
+    }
+    assert.equal(f.container.querySelectorAll('.archive-search-match').length, 2)
+    assert.equal(archive.snapshot.record.content, 'Ёж и ёж')
+    for (const node of archive.snapshot.record.document.content[0].content) {
+      if (node.type === 'text') assert.deepEqual(node.marks.map(mark => mark.type).sort(), ['bold', 'italic', 'underline'])
+    }
+    await act(async () => { undo(archive.state, tr => archive.dispatch(tr)); await archive.flush() })
+    await act(async () => { redo(archive.state, tr => archive.dispatch(tr)); await archive.flush() })
+    assert.equal(f.container.querySelectorAll('.archive-search-match').length, 2)
+    await click(button('Тег')); await inputQuery('ёж'); await click(button('Создать «ёж»'))
+    await act(async () => archive.flush())
+    assert.equal(getSemanticMarkup(archive.state)[0].value, 'ёж')
+    assert.ok(!JSON.stringify(archive.snapshot.record).includes('archive-search'), 'presentation attributes never enter persisted data')
+    assert.equal(f.ref.current.instance.dom.getAttribute('contenteditable'), 'false')
+  } finally { await f.close() }
 })
