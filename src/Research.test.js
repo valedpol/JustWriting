@@ -1,5 +1,6 @@
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { act, createElement } from 'react'
 import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
@@ -7,6 +8,9 @@ import { createLastVerifiedBackupStore } from './backup/lastVerifiedBackup.js'
 
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true, url: 'https://research.test' })
 for (const key of ['window', 'document', 'HTMLElement']) globalThis[key] = dom.window[key]
+const calendarStyle = document.createElement('style')
+calendarStyle.textContent = readFileSync(new URL('./components/ArchiveCalendar.css', import.meta.url), 'utf8')
+document.head.append(calendarStyle)
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 // Full page rendering must not touch any IndexedDB, including the working DB.
 Object.defineProperty(globalThis, 'indexedDB', { configurable: true, get() { throw new Error('IndexedDB forbidden in Research render test') } })
@@ -54,6 +58,19 @@ test('full Research page renders after asynchronous loading, with word caption, 
       assert.deepEqual(errors, [])
       assert.equal(container.querySelector('.research-day p').textContent, '3 слов')
       assert.ok(container.querySelector('.research-chart'))
+      assert.equal(container.querySelectorAll('[aria-label="Месяцы"] button').length, Number(dayKey.slice(5, 7)))
+      assert.equal(container.querySelectorAll('[aria-label="Дни"] button').length, new Date(Date.UTC(Number(dayKey.slice(0, 4)), Number(dayKey.slice(5, 7)), 0)).getUTCDate())
+      await act(async () => container.querySelector('[aria-label="Годы"] button').click())
+      assert.equal(container.querySelector('.research-day h1').textContent.trim(), dayKey.slice(0, 4))
+      assert.equal(container.querySelector('.research-day p').textContent, '3 слов')
+      const todayButton = [...container.querySelectorAll('[aria-label="Дни"] button')].find(button => button.getAttribute('aria-label').includes('есть текст'))
+      await act(async () => todayButton.click())
+      assert.equal(container.querySelector('.research-day p').textContent, '3 слов')
+      assert.equal(todayButton.getAttribute('aria-pressed'), 'true')
+      assert.equal(window.getComputedStyle(todayButton).textDecoration, 'none', 'only the day number has an underline')
+      assert.equal(window.getComputedStyle(todayButton.querySelector('.research-day-number')).textDecoration, 'underline')
+      assert.ok(todayButton.querySelector('.research-day-cell.has-text'))
+      assert.deepEqual(errors, [])
     } finally {
       await act(async () => root.unmount()); container.remove()
     }

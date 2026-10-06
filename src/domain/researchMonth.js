@@ -1,8 +1,9 @@
-export function researchMonth(entries, month) {
+// A saved-key prefix supports both year and month; shared aggregation and labels.
+export function researchMonth(entries, period) {
   let hasText = false
   let words = 0
   for (const [dayKey, entry] of entries) {
-    if (!dayKey.startsWith(month + '-')) continue
+    if (!dayKey.startsWith(period + '-')) continue
     hasText = true
     words += entry.words
   }

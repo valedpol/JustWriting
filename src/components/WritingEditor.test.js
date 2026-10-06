@@ -810,3 +810,127 @@ test('maintenance from another tab blocks archive formatting without changing th
     assert.deepEqual(archive.snapshot.record, original)
   } finally { dom.window.localStorage.removeItem(markerKey); await f.close() }
 })
+
+function pointerEvent(type, pointerId = 1) {
+  const event = new dom.window.Event(type, { bubbles: true, cancelable: true })
+  for (const [key, value] of Object.entries({ button: 0, pointerId, isPrimary: true, pointerType: 'mouse' })) Object.defineProperty(event, key, { value })
+  return event
+}
+
+for (const [name, backwards, long] of [
+  ['short downward', false, false], ['short upward', true, false],
+  ['long downward with scroll', false, true], ['long upward with scroll', true, true],
+]) {
+  test(`archive pointer selection ${name}: native drag stays free, toolbar waits for release`, async () => {
+    const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+    const content = long ? 'Длинный архивный текст '.repeat(200) : 'Архивный текст дня'
+    await writer.dispatch(writer.state.tr.insertText(content, 1))
+    const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+    const archive = createArchiveController(writer.snapshot.record)
+    const original = structuredClone(archive.snapshot.record)
+    const f = await fixture({ controller: archive, readonlyContent: true })
+    try {
+      const view = f.ref.current.instance
+      const text = view.dom.querySelector('p').firstChild
+      const end = text.length - 1
+      await act(async () => f.ref.current.selectAll())
+      assert.ok(document.querySelector('[role=toolbar]'), 'starting toolbar exists')
+      let measures = 0
+      const originalCoords = view.coordsAtPos.bind(view)
+      view.coordsAtPos = (...args) => { measures++; return originalCoords(...args) }
+      const down = pointerEvent('pointerdown')
+      await act(async () => view.dom.dispatchEvent(down))
+      assert.equal(down.defaultPrevented, false, 'native pointer gesture is not blocked')
+      assert.equal(document.querySelector('[role=toolbar]'), null)
+      const duringDragMeasures = measures
+      await act(async () => {
+        const previousSelection = archive.state.selection
+        const outside = document.createTextNode('outside day')
+        f.container.append(outside)
+        window.getSelection().setBaseAndExtent(outside, 0, outside, 3)
+        document.dispatchEvent(new dom.window.Event('selectionchange'))
+        assert.ok(archive.state.selection.eq(previousSelection), 'intermediate outside range must not force a readonly collapse')
+        window.getSelection().setBaseAndExtent(text, 0, text, 3)
+        outside.remove()
+      })
+      for (const boundary of [3, Math.floor(end / 2), end]) {
+        await act(async () => {
+          window.getSelection().setBaseAndExtent(text, backwards ? end : 0, text, backwards ? end - boundary : boundary)
+          document.dispatchEvent(new dom.window.Event('selectionchange'))
+          if (long) f.container.querySelector('.writing-scroll').dispatchEvent(new dom.window.Event('scroll'))
+          await new Promise(resolve => setTimeout(resolve, 25))
+        })
+        assert.equal(document.querySelector('[role=toolbar]'), null)
+      }
+      assert.equal(measures, duringDragMeasures, 'toolbar must not measure transient selection or scroll positions')
+      const nativeText = window.getSelection().toString()
+      assert.equal(nativeText, content.slice(0, end))
+      // Unrelated pointers do not prematurely complete this mouse gesture.
+      await act(async () => { document.dispatchEvent(pointerEvent('pointerup', 2)); await new Promise(resolve => setTimeout(resolve, 5)) })
+      assert.equal(document.querySelector('[role=toolbar]'), null)
+      await act(async () => { document.dispatchEvent(pointerEvent('pointerup')); await new Promise(resolve => setTimeout(resolve, 30)) })
+      assert.ok(document.querySelector('[role=toolbar]'))
+      assert.equal(window.getSelection().toString(), nativeText)
+      assert.equal(archive.state.selection.anchor > archive.state.selection.head, backwards)
+      assert.equal(view.dom.getAttribute('contenteditable'), 'false')
+      assert.deepEqual(archive.snapshot.record, original, 'selection and scrolling do not save user data')
+      for (const label of ['Жирный', 'Курсив', 'Подчёркнутый']) {
+        await click(document.querySelector(`[aria-label="${label}"]`))
+        await act(async () => archive.flush())
+        assert.equal(archive.snapshot.record.content, original.content)
+      }
+      for (const category of ['Тег', 'Название']) {
+        await click(button(category))
+        await inputQuery(category)
+        await click(button(`Создать «${category}»`))
+        await act(async () => archive.flush())
+      }
+      assert.deepEqual(getSemanticMarkup(archive.state).map(item => item.kind), ['tag', 'title'])
+      assert.equal(archive.snapshot.record.content, original.content)
+      await act(async () => {
+        window.getSelection().removeAllRanges()
+        document.dispatchEvent(new dom.window.Event('selectionchange'))
+      })
+      assert.equal(document.querySelector('[role=toolbar]'), null)
+    } finally { await f.close() }
+  })
+}
+
+test('keyboard selection needs no pointer release; cancel, blur and unmount end pointer lifecycle', async () => {
+  const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+  await writer.dispatch(writer.state.tr.insertText('Архивный текст', 1))
+  const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+  const archive = createArchiveController(writer.snapshot.record)
+  const f = await fixture({ controller: archive, readonlyContent: true })
+  try {
+    const view = f.ref.current.instance
+    await act(async () => {
+      view.dom.focus()
+      view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }))
+      // JSDOM has no native arrow navigation: provide its resulting selection.
+      const text = view.dom.querySelector('p').firstChild
+      window.getSelection().setBaseAndExtent(text, 0, text, 4)
+      document.dispatchEvent(new dom.window.Event('selectionchange'))
+      await new Promise(resolve => setTimeout(resolve, 30))
+    })
+    assert.ok(document.querySelector('[role=toolbar]'))
+    for (const release of ['pointercancel', 'blur']) {
+      await act(async () => view.dom.dispatchEvent(pointerEvent('pointerdown')))
+      assert.equal(document.querySelector('[role=toolbar]'), null)
+      await act(async () => {
+        if (release === 'blur') window.dispatchEvent(new dom.window.Event('blur'))
+        else document.dispatchEvent(pointerEvent(release))
+        await new Promise(resolve => setTimeout(resolve, 30))
+      })
+      assert.ok(document.querySelector('[role=toolbar]'))
+    }
+    await act(async () => {
+      view.dom.dispatchEvent(pointerEvent('pointerdown'))
+      document.dispatchEvent(pointerEvent('pointerup'))
+      await f.render(true, false)
+    })
+    assert.equal(document.querySelector('[role=toolbar]'), null)
+  } finally { await f.close() }
+  await act(async () => { document.dispatchEvent(pointerEvent('pointerup')); await new Promise(resolve => setTimeout(resolve, 5)) })
+  assert.equal(document.querySelector('[role=toolbar]'), null)
+})

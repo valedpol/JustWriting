@@ -13,7 +13,7 @@ const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, me
     catch { return { error: true } }
   })
   useEffect(() => loaded.controller ? registerBackupFlush(() => loaded.controller.flush()) : undefined, [loaded])
-  useImperativeHandle(ref, () => ({ toggleSelection() {
+  useImperativeHandle(ref, () => ({ flush: () => loaded.controller?.flush() ?? Promise.resolve(), toggleSelection() {
     if (editor.current) editor.current.toggleSelectAll()
     else if (fallback.current) {
       const range = document.createRange()
@@ -23,7 +23,7 @@ const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, me
       selection.removeAllRanges()
       selection.addRange(range)
     }
-  } }), [])
+  } }), [loaded])
   if (loaded.error) return <div ref={fallback}><ReadonlyDocument record={record} /></div>
   return <div className="archive-writing-entry">
     <WritingEditor ref={editor} controller={loaded.controller} active writing ready readonlyContent

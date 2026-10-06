@@ -40,3 +40,22 @@ test('timer shortcut composes existing section and mode transitions from every i
     assert.deepEqual(before, { section, screenMode: modes.interface })
   }
 })
+
+test('reload restores only the top-level section, for every page; invalid or unavailable storage is safe', async () => {
+  const { restoreScreen, rememberSection } = await import('./editorScreen.js')
+  const values = new Map()
+  const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) }
+  assert.deepEqual(restoreScreen(storage), initialScreen)
+  for (const section of ['today', 'archive', 'research', 'settings']) {
+    rememberSection(section, storage)
+    assert.deepEqual(restoreScreen(storage), { section, screenMode: modes.interface })
+    assert.equal(values.size, 1, 'no period, writing mode or editor state is persisted')
+  }
+  rememberSection('invalid', storage)
+  assert.equal(restoreScreen(storage).section, 'settings')
+  values.set('just-writing-current-section-v1', 'invalid')
+  assert.deepEqual(restoreScreen(storage), initialScreen)
+  const unavailable = { getItem() { throw new Error('denied') }, setItem() { throw new Error('denied') } }
+  assert.deepEqual(restoreScreen(unavailable), initialScreen)
+  assert.doesNotThrow(() => rememberSection('archive', unavailable))
+})

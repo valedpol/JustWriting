@@ -5,6 +5,9 @@ import { createPortal } from 'react-dom'
 import { listTexts } from './storage/textRepository'
 import { getWordCount } from './domain/wordCount'
 import { archiveDateTop, collapseAnchor } from './domain/archiveViewport.js'
+import ArchiveCalendar from './components/ArchiveCalendar.jsx'
+import { periodLabel } from './domain/calendarPeriod.js'
+import { filterArchivePeriod, archiveCalendarEntries } from './domain/archivePeriod.js'
 import './MyTexts.css'
 
 function ArchiveRailHost({ textId, register, onActive }) {
@@ -20,6 +23,13 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   const [records, setRecords] = useState(null)
   const [expanded, setExpanded] = useState(() => new Set())
   const [failed, setFailed] = useState(false)
+  const [period, setPeriod] = useState(null)
+  const [calendarOpen, setCalendarOpen] = useState(false)
+  const [changingPeriod, setChangingPeriod] = useState(false)
+  const [periodError, setPeriodError] = useState('')
+  const periodChange = useRef(false)
+  const resetResults = useRef(false)
+  const visibleRecords = records ? filterArchivePeriod(records, period) : null
   const [metadataLayout, setMetadataLayout] = useState(null)
   const [railHosts, setRailHosts] = useState({})
   const registerHost = useCallback((id, node) => setRailHosts(previous => previous[id] === node ? previous : { ...previous, [id]: node }), [])
@@ -64,7 +74,17 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
 
   useLayoutEffect(() => {
     const area = scrollArea.current
-    if (!area || !records?.length) return
+    if (!area) return
+    if (resetResults.current) {
+      resetResults.current = false
+      const list = area.querySelector('ul')
+      if (list) list.style.paddingTop = ''
+      area.scrollTop = 0
+      positioned.current = true
+      return
+    }
+    const visibleRecords = records ? filterArchivePeriod(records, period) : null
+    if (!visibleRecords?.length) return
     const anchor = pendingCollapse.current
     pendingCollapse.current = null
     if (anchor) {
@@ -87,7 +107,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     if (openedId) {
       const list = area.querySelector('ul')
       if (list) list.style.paddingTop = ''
-      if (openedId === records[0].textId) {
+      if (openedId === visibleRecords[0].textId) {
         area.scrollTop = 0
       } else {
         const item = Array.from(area.querySelectorAll('[data-text-id]')).find((node) => node.dataset.textId === openedId)
@@ -103,13 +123,13 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     if (positioned.current) return
     const now = new Date()
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    const target = records.find((record) => record.dayKey === today) || records[records.length - 1]
+    const target = visibleRecords.find((record) => record.dayKey === today) || visibleRecords[visibleRecords.length - 1]
     const item = Array.from(area.querySelectorAll('[data-text-id]')).find((node) => node.dataset.textId === target.textId)
     if (item) {
       area.scrollTop += item.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 3
       positioned.current = true
     }
-  }, [records, expanded])
+  }, [records, expanded, period])
 
   useLayoutEffect(() => {
     const area = scrollArea.current
@@ -141,7 +161,32 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       window.removeEventListener('resize', alignMetadata)
       observer.disconnect()
     }
-  }, [records, expanded, metadataHost])
+  }, [records, expanded, metadataHost, period, calendarOpen])
+
+  const changePeriod = async nextPeriod => {
+    if (periodChange.current || nextPeriod === period) return
+    periodChange.current = true
+    setChangingPeriod(true)
+    setPeriodError('')
+    try {
+      const retained = new Set(filterArchivePeriod(records, nextPeriod).map(record => record.textId))
+      const disappearing = visibleRecords.filter(record => !retained.has(record.textId))
+      await Promise.all(disappearing.map(record => editors.current.get(record.textId)?.flush()))
+      const selection = window.getSelection()
+      if (selection?.rangeCount && disappearing.some(record => {
+        const node = Array.from(scrollArea.current.querySelectorAll('[data-text-id]')).find(item => item.dataset.textId === record.textId)
+        return node && selection.getRangeAt(0).intersectsNode(node)
+      })) selection.removeAllRanges()
+      setExpanded(previous => new Set([...previous].filter(id => retained.has(id))))
+      pendingExpansion.current = null
+      pendingCollapse.current = null
+      if (!retained.has(activeRecord.current)) activeRecord.current = null
+      resetResults.current = true
+      setHasOpened(true)
+      setPeriod(nextPeriod)
+    } catch (error) { setPeriodError(error.message || 'Не удалось завершить сохранение. Период не изменён.') }
+    finally { periodChange.current = false; setChangingPeriod(false) }
+  }
 
   const toggleRecord = (record) => {
     const opening = !expanded.has(record.textId)
@@ -175,12 +220,25 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   }
 
   return <><div className="editor-shell my-texts">
+    {records ? <div className="archive-calendar-controls">
+      <div className="archive-calendar-heading">
+      <button type="button" aria-expanded={calendarOpen} aria-controls="archive-calendar" onClick={() => setCalendarOpen(open => !open)}>Календарь</button>
+      {period ? <span className="archive-period">{periodLabel(period)} <button type="button" aria-label="Снять выбранный период" disabled={changingPeriod} onClick={() => changePeriod(null)}>×</button></span> : null}
+      </div>
+      {periodError ? <p role="alert">{periodError}</p> : null}
+      {calendarOpen ? <fieldset id="archive-calendar" disabled={changingPeriod}>
+        <ArchiveCalendar entries={archiveCalendarEntries(records)}
+          period={period ?? records.at(-1)?.dayKey ?? new Date().toISOString().slice(0, 10)}
+          currentKey={[...records.map(record => record.dayKey), new Date().toISOString().slice(0, 10)].sort().at(-1)}
+          onSelect={changePeriod} />
+      </fieldset> : null}
+    </div> : null}
     <div className="archive-actions-space" ref={actionsSlot} aria-hidden="true" />
     <div className={`archive-scroll${hasOpened ? ' is-reading' : ''}`} ref={setScrollArea}>
       {failed ? <p role="alert">Не удалось прочитать сохранённые тексты.</p>
         : !records ? <p role="status">Загружаю…</p>
-        : records.length ? <ul>
-          {records.map((record) => <li key={record.textId} data-text-id={record.textId}
+        : visibleRecords.length ? <ul>
+          {visibleRecords.map((record) => <li key={record.textId} data-text-id={record.textId}
             onMouseDownCapture={() => { activeRecord.current = record.textId }}
             onFocusCapture={() => { activeRecord.current = record.textId }}>
             {!expanded.has(record.textId) ? <button className="archive-preview-button" type="button" aria-label={`Раскрыть текст за ${dateLabel(record.dayKey)}`} aria-expanded={false} onClick={() => toggleRecord(record)}>
@@ -198,7 +256,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
               </div>
             </> : null}
           </li>)}
-        </ul> : <p>Сохранённых текстов пока нет.</p>}
+        </ul> : <p>{period ? 'В выбранном периоде текстов нет.' : 'Сохранённых текстов пока нет.'}</p>}
     </div>
   </div>
     {metadataHost && metadataLayout && records ? createPortal(
@@ -207,7 +265,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
         <button type="button" onClick={collapseAll}>Схлопнуть все тексты</button>
       </div> : null}
       <div className="archive-day-metadata" style={{ top: metadataLayout.top, height: metadataLayout.height }}>
-        {records.map((record, index) => {
+        {visibleRecords.map((record, index) => {
           const position = metadataLayout.positions[index]
           const open = expanded.has(record.textId)
           const top = position?.top ?? 0

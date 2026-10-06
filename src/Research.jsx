@@ -5,13 +5,10 @@ import './Research.css'
 import { writingChart, periodScale } from './domain/writingChart.js'
 import { localDayKey } from './domain/writingDay.js'
 import WritingChart from './components/WritingChart.jsx'
-import ResearchDayCell from './components/ResearchDayCell.jsx'
+import ArchiveCalendar from './components/ArchiveCalendar.jsx'
+import { periodLabel } from './domain/calendarPeriod.js'
 import ResearchTotals from './components/ResearchTotals.jsx'
 import { createLastVerifiedBackupStore } from './backup/lastVerifiedBackup.js'
-import ResearchMonth from './components/ResearchMonth.jsx'
-
-const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-const dateLabel = (key) => new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(key + 'T12:00:00Z'))
 
 export default function Research({ userId, flush }) {
   const [backupStore] = useState(() => createLastVerifiedBackupStore())
@@ -42,35 +39,15 @@ export default function Research({ userId, flush }) {
   if (!data) return <div className="research-content"><p role="status">{error || 'Загружаю…'}</p></div>
   const period = selected && selected <= data.calendarKey ? selected : data.currentKey
   const scale = periodScale(period)
-  const year = period.slice(0, 4)
-  const month = period.length >= 7 ? period.slice(0, 7)
-    : year === data.calendarKey.slice(0, 4) ? data.calendarKey.slice(0, 7) : year + '-01'
   const key = scale === 'day' ? period : null
-  const earliest = [...data.entries.keys(), data.currentKey].sort()[0]
-  const years = Array.from({ length: Number(data.currentKey.slice(0, 4)) - Number(earliest.slice(0, 4)) + 1 }, (_, i) => String(Number(earliest.slice(0, 4)) + i))
-  const monthCount = year === data.currentKey.slice(0, 4) ? Number(data.currentKey.slice(5, 7)) : 12
-  const dayCount = new Date(Date.UTC(Number(year), Number(month.slice(5, 7)), 0)).getUTCDate()
   const entry = data.entries.get(key)
   const chart = writingChart(data, period, data.calendarKey)
   const periodWords = scale === 'day' ? entry?.words ?? 0 : chart.points.reduce((sum, point) => sum + point.value, 0)
-  const heading = scale === 'day' ? dateLabel(period) : scale === 'year' ? period
-    : months[Number(period.slice(5, 7)) - 1] + ' ' + year
+  const heading = periodLabel(period)
   return <div className="research-content">
     {error ? <p role="alert">{error}</p> : null}
     <ResearchTotals data={data} backupCount={data.backupCount} />
-    <nav className="research-time" aria-label="Выбор даты">
-      <div className="research-time-row" role="group" aria-label="Годы"><div>{years.map((value) => <button key={value} aria-pressed={value === year} onClick={() => setSelected(value)}>{value}</button>)}</div></div>
-      <div className="research-time-row" role="group" aria-label="Месяцы"><div>{months.slice(0, monthCount).map((label, i) => {
-        const value = year + '-' + String(i + 1).padStart(2, '0')
-        return <ResearchMonth key={value} entries={data.entries} month={value} label={label} selected={scale !== 'year' && value === month} onSelect={() => setSelected(value)} />
-      })}</div></div>
-      <div className="research-time-row research-days-row" role="group" aria-label="Дни"><div>{Array.from({ length: dayCount }, (_, i) => {
-        const value = month + '-' + String(i + 1).padStart(2, '0')
-        return <ResearchDayCell key={value} entry={data.entries.get(value)} day={i + 1}
-          label={dateLabel(value)} disabled={value > data.currentKey} selected={value === key}
-          onSelect={() => setSelected(value)} />
-      })}</div></div>
-    </nav>
+    <ArchiveCalendar entries={data.entries} period={period} currentKey={data.currentKey} calendarKey={data.calendarKey} onSelect={setSelected} />
     <section className="research-day">
       <h1>{heading} {key === data.currentKey ? <small>сегодня</small> : null}</h1>
       <p>{scale === 'day' && !entry ? 'Текста нет' : `${periodWords.toLocaleString('ru-RU')} слов`}</p>

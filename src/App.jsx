@@ -9,7 +9,7 @@ import ResearchNavigation from './components/ResearchNavigation'
 import WordCounter from './components/WordCounter'
 import WritingEditor from './components/WritingEditor.jsx'
 import { useWorkspaceScroll } from './hooks/useWorkspaceScroll'
-import { SCREEN_MODES, initialScreen, editorScreenReducer } from './domain/editorScreen'
+import { SCREEN_MODES, initialScreen, editorScreenReducer, restoreScreen, rememberSection } from './domain/editorScreen'
 import { assertBackupWriterReady } from './backup/userBackup.js'
 
 function formatLongDate(date) {
@@ -35,7 +35,8 @@ function formatCountdown(ms) {
 function App() {
   const { controller, text, status, error, userId, ready, flush, localProfile, updateSetting, dayEndsAt, graceUntil, endWriting, retry } = useTodayText()
   const authorName = localProfile?.displayName ?? 'Pol Valery'
-  const [{ section, screenMode }, dispatchScreen] = useReducer(editorScreenReducer, initialScreen)
+  const [{ section, screenMode }, dispatchScreen] = useReducer(editorScreenReducer, initialScreen, () => restoreScreen())
+  useEffect(() => { rememberSection(section) }, [section])
   const isToday = section === 'today'
   const [archiveWords, setArchiveWords] = useState(null)
   const [archiveMetadataHost, setArchiveMetadataHost] = useState(null)

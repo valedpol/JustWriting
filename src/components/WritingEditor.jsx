@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { EditorView } from '@tiptap/pm/view'
-import { AllSelection, Selection } from '@tiptap/pm/state'
+import { AllSelection, Selection, TextSelection } from '@tiptap/pm/state'
 import { undo, redo } from '@tiptap/pm/history'
 import { firstTextHasMark, toggleFirstTextMark } from '../editor/formatting.js'
 import { assertArchiveTransaction } from '../editor/archivePresentation.js'
@@ -33,6 +33,8 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   const [message, setMessage] = useState('')
   const [focused, setFocused] = useState(false)
   const [nativeSelected, setNativeSelected] = useState(null)
+  const pointerSelection = useRef({ active: false, id: null, releaseTimer: null })
+  const [pointerSelecting, setPointerSelecting] = useState(false)
   const panelOpen = Boolean(panel)
   const categoryOpen = Boolean(panel?.category)
   const ime = useRef({ timer: null, ending: false, acceptedAt: null })
@@ -182,8 +184,12 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       },
     })
     viewRef.current = view
+    const gesture = pointerSelection.current
+    const ownerDocument = view.dom.ownerDocument
     const selectionChanged = () => {
-      const ownerDocument = view.dom.ownerDocument
+      // Intermediate browser ranges (including a temporary range outside this
+      // day) are not a completed selection. Never collapse them during drag.
+      if (gesture.active) return
       // Focusing the picker is a panel interaction, not deselecting the text.
       if (panelRef.current?.category && toolbarRef.current?.contains(ownerDocument.activeElement)) return
       const selection = ownerDocument.getSelection()
@@ -198,6 +204,45 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
         controller.dispatch(controller.state.tr.setSelection(Selection.near(controller.state.doc.resolve(position)))).catch(report)
       }
     }
+    const beginPointerSelection = event => {
+      if (event.button !== 0 || event.isPrimary === false || !view.dom.contains(event.target)) return
+      if (gesture.active) return // pointerdown followed by compatibility mousedown
+      clearTimeout(gesture.releaseTimer)
+      gesture.active = true
+      gesture.id = event.pointerId ?? null
+      setPointerSelecting(true)
+    }
+    const finishPointerSelection = event => {
+      if (!gesture.active || (event.pointerId != null && gesture.id != null && event.pointerId !== gesture.id)) return
+      clearTimeout(gesture.releaseTimer)
+      // Let browser/ProseMirror mouseup handlers finish before reading the range.
+      gesture.releaseTimer = setTimeout(() => {
+        gesture.releaseTimer = null
+        gesture.active = false
+        gesture.id = null
+        const selection = ownerDocument.getSelection()
+        if (latest.current.readonlyContent && selection && !selection.isCollapsed &&
+          view.dom.contains(selection.anchorNode) && view.dom.contains(selection.focusNode)) {
+          try {
+            const anchor = view.posAtDOM(selection.anchorNode, selection.anchorOffset)
+            const head = view.posAtDOM(selection.focusNode, selection.focusOffset)
+            const finalSelection = TextSelection.between(view.state.doc.resolve(anchor), view.state.doc.resolve(head))
+            if (!finalSelection.eq(controller.state.selection)) {
+              view.dispatch(controller.state.tr.setSelection(finalSelection))
+            }
+          } catch { /* A removed range will be handled by selectionChanged below. */ }
+        }
+        selectionChanged()
+        setPointerSelecting(false)
+        refresh()
+      }, 0)
+    }
+    ownerDocument.addEventListener('pointerdown', beginPointerSelection, true)
+    ownerDocument.addEventListener('mousedown', beginPointerSelection, true)
+    ownerDocument.addEventListener('pointerup', finishPointerSelection, true)
+    ownerDocument.addEventListener('mouseup', finishPointerSelection, true)
+    ownerDocument.addEventListener('pointercancel', finishPointerSelection, true)
+    ownerDocument.defaultView.addEventListener('blur', finishPointerSelection)
     view.dom.ownerDocument.addEventListener('selectionchange', selectionChanged)
     setRuntime({ view, scroller: host.current.parentElement })
     const unsubscribe = controller.subscribe(snapshot => {
@@ -211,6 +256,15 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     })
     return () => {
       clearTimeout(compositionState.timer); unsubscribe()
+      clearTimeout(gesture.releaseTimer)
+      gesture.active = false
+      gesture.id = null
+      ownerDocument.removeEventListener('pointerdown', beginPointerSelection, true)
+      ownerDocument.removeEventListener('mousedown', beginPointerSelection, true)
+      ownerDocument.removeEventListener('pointerup', finishPointerSelection, true)
+      ownerDocument.removeEventListener('mouseup', finishPointerSelection, true)
+      ownerDocument.removeEventListener('pointercancel', finishPointerSelection, true)
+      ownerDocument.defaultView.removeEventListener('blur', finishPointerSelection)
       view.dom.ownerDocument.removeEventListener('selectionchange', selectionChanged)
       view.destroy(); viewRef.current = null
     }
@@ -232,6 +286,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     const view = viewRef.current
     if (!view || !active) return
     const measure = () => {
+      if (pointerSelection.current.active) return
       try {
         const from = panelRef.current?.from ?? view.state.selection.from
         const coords = view.coordsAtPos(Math.min(from, view.state.doc.content.size))
@@ -245,7 +300,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     const observer = new ResizeObserver(measure)
     observer.observe(host.current)
     return () => { scroller?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); observer.disconnect() }
-  }, [tick, active, writing, metadataHost, panelOpen, controller, scrollElement])
+  }, [tick, active, writing, metadataHost, panelOpen, controller, scrollElement, pointerSelecting])
 
   const chooseCategory = category => {
     const state = controller.state
@@ -283,13 +338,14 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   ], controller.snapshot.context.userId, panel.category, panel.query) : []
   const selected = state && !state.selection.empty && firstTextHasMark(state, state.schema.marks.bold) !== null
   const canChangePresentation = controller?.snapshot.canChangePresentation !== false && controller?.snapshot.writable
-  const panelVisible = canChangePresentation && active && writing && ready && position && (panel || (selected && focused && nativeSelected !== false))
+  const panelVisible = !pointerSelecting && canChangePresentation && active && writing && ready && position && (panel || (selected && focused && nativeSelected !== false))
   useLayoutEffect(() => {
     const element = toolbarRef.current
     const view = viewRef.current
     // Only the selection toolbar. Slash and category panels keep their geometry.
     if (!panelVisible || panel || !element || !view) return
     const place = () => {
+      if (pointerSelection.current.active) return
       const selectionTop = view.coordsAtPos(view.state.selection.from, 1).top
       const panelHeight = element.getBoundingClientRect().height
       // Insufficient space above the selection is a separate edge case:
