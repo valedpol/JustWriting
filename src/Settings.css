@@ -32,3 +32,15 @@
 .settings-timezone-options > div { padding: 8px 10px; cursor: pointer; }
 .settings-timezone-options .is-highlighted { background: #f4f4f4; }
 .settings-timezone-options small { display: block; margin-top: 3px; color: #777; }
+.backup-data { margin-top: 28px; }
+.backup-data h3 { font: 400 18px/1.5 Georgia, serif; margin: 0 0 16px; }
+.backup-actions { display: flex; flex-wrap: wrap; gap: 16px 24px; margin-bottom: 18px; }
+.backup-data button:disabled { opacity: .45; cursor: default; }
+.backup-data details { margin-top: 16px; font-size: .82rem; }
+.backup-data dd { margin: 0 0 12px; overflow-wrap: anywhere; }
+.settings-content .backup-actions button { border: 1px solid #d9d9d9; border-radius: 4px; padding: 9px 14px; background: #fff; }
+.settings-content .backup-actions button:first-child { background: #f3f3f3; border-color: #bdbdbd; color: #262626; }
+.backup-actions button:not(:disabled):hover { border-color: #888; }
+.backup-last-verified { margin-top: 24px; font-size: .9rem; }
+.backup-last-verified strong { display: block; margin-bottom: 6px; font-weight: 500; }
+.backup-data summary { cursor: pointer; color: #777; }

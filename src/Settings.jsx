@@ -3,12 +3,13 @@ import { createPortal } from 'react-dom'
 import './Settings.css'
 import TimeInput from './components/TimeInput.jsx'
 import TimezoneSelect from './components/TimezoneSelect.jsx'
+import BackupData from './components/BackupData.jsx'
 import { parseDayStart, formatDayStart } from './domain/writingDay.js'
 
 const networks = ['Telegram', 'Instagram', 'Facebook', 'VK', 'YouTube']
 
 // Name, day start and word goal persist; other controls remain a visual prototype.
-export default function Settings({ profile, onSave, statusHost }) {
+export default function Settings({ profile, onSave, statusHost, assertCanCreateBackup, onBackupActiveChange }) {
   const [nameDraft, setName] = useState(null)
   const [dayStartDraft, setDayStart] = useState(null)
   const name = nameDraft ?? profile?.displayName ?? ''
@@ -17,6 +18,7 @@ export default function Settings({ profile, onSave, statusHost }) {
   const formatError = 'Введите время в формате ЧЧ:ММ, например 01:00.'
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
+  const [backupActive, setBackupActive] = useState(false)
   const save = async (field) => {
     if (!profile || saving) return
     try {
@@ -72,14 +74,14 @@ export default function Settings({ profile, onSave, statusHost }) {
 
     <section aria-labelledby="settings-profile">
       <h2 id="settings-profile">Профиль</h2>
-      <label className="settings-row"><span>Имя</span><input value={name} onChange={(event) => setName(event.target.value)} onBlur={() => save('displayName')} onKeyDown={enter} disabled={!profile || saving} autoComplete="off" /></label>
+      <label className="settings-row"><span>Имя</span><input value={name} onChange={(event) => setName(event.target.value)} onBlur={() => save('displayName')} onKeyDown={enter} disabled={!profile || saving || backupActive} autoComplete="off" /></label>
       <label className="settings-row"><span>Email</span><input type="email" placeholder="name@example.com" autoComplete="off" /></label>
       <div className="settings-row"><span>Подтверждение email</span><span className="settings-note">Нет данных о подтверждении</span></div>
     </section>
 
     <section aria-labelledby="settings-writing">
       <h2 id="settings-writing">Письмо</h2>
-      <div className="settings-row"><label htmlFor="settings-day-start">Начало дня</label><div className="settings-time-field"><TimeInput id="settings-day-start" value={dayStart} onChange={(value) => { setDayStart(value); setTimeError('') }} onInvalid={() => setTimeError(formatError)} onBlur={() => save('dayStartMinutes')} onKeyDown={enter} disabled={!profile || saving} aria-invalid={Boolean(timeError)} aria-describedby="settings-time-format" />
+      <div className="settings-row"><label htmlFor="settings-day-start">Начало дня</label><div className="settings-time-field"><TimeInput id="settings-day-start" value={dayStart} onChange={(value) => { setDayStart(value); setTimeError('') }} onInvalid={() => setTimeError(formatError)} onBlur={() => save('dayStartMinutes')} onKeyDown={enter} disabled={!profile || saving || backupActive} aria-invalid={Boolean(timeError)} aria-describedby="settings-time-format" />
       <p id="settings-time-format" className={`settings-note settings-field-note${timeError ? ' settings-error' : ''}`} role={timeError ? 'alert' : undefined}>{timeError || 'Формат 24 часа — ЧЧ:ММ'}</p>
       </div></div>
       <div className="settings-row">
@@ -90,7 +92,7 @@ export default function Settings({ profile, onSave, statusHost }) {
         <div className="settings-time-field">
           <input id="settings-word-goal" type="text" inputMode="numeric" placeholder="Без нормы" value={wordGoal}
             onChange={(event) => { setWordGoal(event.target.value); setGoalError('') }}
-            onBlur={saveGoal} onKeyDown={enter} disabled={!profile || saving}
+            onBlur={saveGoal} onKeyDown={enter} disabled={!profile || saving || backupActive}
             aria-invalid={Boolean(goalError)} aria-describedby={goalError ? 'settings-goal-error' : undefined} />
           {goalError ? <p id="settings-goal-error" className="settings-note settings-field-note settings-error" role="alert">{goalError}</p> : null}
         </div>
@@ -125,6 +127,11 @@ export default function Settings({ profile, onSave, statusHost }) {
     <section aria-labelledby="settings-account">
       <h2 id="settings-account">Аккаунт</h2>
       <div className="settings-row"><span>Уровень аккаунта</span><span className="settings-note">Не назначен</span></div>
+      <BackupData onActiveChange={active => { setBackupActive(active); onBackupActiveChange?.(active) }} assertCanCreate={() => {
+        if (saving) throw new Error('Дождитесь завершения сохранения настроек.')
+        if (timeError || goalError) throw new Error('Исправьте ошибку настройки перед созданием копии.')
+        assertCanCreateBackup?.()
+      }} />
     </section>
   </div>
 }

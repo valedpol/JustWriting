@@ -10,6 +10,7 @@ import WordCounter from './components/WordCounter'
 import WritingEditor from './components/WritingEditor.jsx'
 import { useWorkspaceScroll } from './hooks/useWorkspaceScroll'
 import { SCREEN_MODES, initialScreen, editorScreenReducer } from './domain/editorScreen'
+import { assertBackupWriterReady } from './backup/userBackup.js'
 
 function formatLongDate(date) {
   const formatter = new Intl.DateTimeFormat('ru-RU', {
@@ -39,6 +40,7 @@ function App() {
   const [archiveWords, setArchiveWords] = useState(null)
   const [archiveMetadataHost, setArchiveMetadataHost] = useState(null)
   const [settingsStatusHost, setSettingsStatusHost] = useState(null)
+  const [backupActive, setBackupActive] = useState(false)
   const [now, setNow] = useState(new Date())
   const editorRef = useRef(null)
   const workspaceRef = useRef(null)
@@ -58,6 +60,7 @@ function App() {
     dispatchScreen({ type: 'mode', mode })
   }
   const openSection = nextSection => {
+    if (backupActive) return
     editorRef.current?.finishComposition()
     editorRef.current?.cancelPanel()
     endWriting()
@@ -221,7 +224,8 @@ function App() {
               writing={screenMode !== SCREEN_MODES.interface} metadataHost={archiveMetadataHost}
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
-          {section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost} /> : section === 'archive' ? <MyTexts userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} /> : null}
+          {section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
+            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <MyTexts userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} /> : null}
         </section>
 
         <aside className="right-sidebar" ref={setArchiveMetadataHost} />

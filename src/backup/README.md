@@ -1,7 +1,7 @@
 # Technical backup and isolated verification
 
-Permanent Console-only infrastructure; no automatic export, restore or
-maintenance entry. The application exposes `window.justWritingBackup` and
+Permanent infrastructure with an explicit Settings → Account → Data interface
+and Console API; no automatic export, restore or maintenance entry. The application exposes `window.justWritingBackup` and
 `window.justWritingMaintenance`. Every module URL within the tab uses the same
 maintenance coordinator, including Console imports and Vite/HMR instances.
 Each browser document has its own coordinator and shares origin-local Web Locks
@@ -19,7 +19,39 @@ There are no historical source hashes, calendar dates, profile requirements or
 fixed localhost assumptions. Existing schema/data are captured as they are;
 backup verification never recalculates saved day boundaries or policy.
 
-## Checkpoint procedure
+## User interface
+
+Settings → Account → Data contains “Создать резервную копию” and
+“Проверить резервную копию”. Creation requires a ready writer with no active
+IME, pending save or save error. It enters maintenance, flushes the live
+controllers and captures a checkpoint. Download alone never means verified.
+Choose the saved file with the regular file input; its bytes must match the
+checkpoint, then UUID restore/reopen/full comparison must pass. Success exits
+the owned maintenance session and displays “Резервная копия проверена”.
+
+Checking an existing file validates its hashes and v4 structure, restores to a
+fresh UUID database, reopens and compares it with that file. It never reads or
+compares the current working database. No working restore writer exists.
+Other origins are recorded as metadata, not silently rewritten.
+
+Cancelling the picker or explicitly returning to work exits owned maintenance
+without declaring verification success. Flush/restore failures never silently
+release maintenance; use “Вернуться к работе без проверки” in the owner tab.
+If a failed restore leaves a UUID database, preserve it for diagnosis; never
+delete or clear the working database. The exact filename, bytes, SHA-256,
+capture time, origin, DB version and counts are available in technical details.
+
+The Account retains “Последняя проверенная копия” with creation date and text
+count, and collapsed technical details. Only a successful UUID restore/reopen
+and deletion replaces this receipt; downloads, cancellations and failures keep
+the previous receipt. Creation and verification times, filename, byte size,
+SHA-256, version, origin, counts and UUID verification results are stored under
+`just-writing-last-verified-backup-v1` in origin-local localStorage. No file or
+backup payload is stored there, and no working IndexedDB write/schema change is
+needed. The receipt survives reloads and browser restarts in the same profile;
+clearing site data removes it. Research does not consume it yet.
+
+## Console checkpoint procedure
 
 Use one ready application tab, finish IME/input and close other application tabs.
 Keep the owner tab open during maintenance; do not reload/edit source/restart
