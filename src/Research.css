@@ -21,6 +21,7 @@
 .research-day h2 { font: 400 20px/1.5 Georgia, serif; margin-top: 36px; }
 .research-chart { display: block; width: 100%; height: auto; overflow: visible; }
 .research-chart text { fill: #777; font: 12px Arial, sans-serif; }
+.research-chart-day text { font-family: inherit; font-weight: 400; font-size: calc(0.85rem * var(--chart-label-scale, 1)); }
 .research-axis { fill: none; stroke: #d9d9d9; }
 .research-line { fill: none; stroke: #444; stroke-width: 1.5; }
 .research-chart circle { fill: #444; }
