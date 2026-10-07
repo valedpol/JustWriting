@@ -2,7 +2,7 @@ import { maintenance } from '../runtime/maintenance.js'
 import { encode, decode } from './backupCodec.js'
 import { bytesHash } from '../utils/files.js'
 
-const STORES = ['settings', 'texts', 'userDays', 'wordCountSamples']
+import { databaseSchema } from '../storage/databaseSchema.js'
 const PREFIX = 'just-writing-backup-verification-'
 const REGISTRY = Symbol.for('just-writing.backup-isolated-databases.v1')
 if (!Object.hasOwn(globalThis, REGISTRY)) Object.defineProperty(globalThis, REGISTRY, { value: new Set() })
@@ -28,9 +28,11 @@ function open(factory, name, version, upgrade) {
 }
 export function readBackupDatabaseSnapshot(db) {
   return new Promise((resolve, reject) => {
-    if (!same(Array.from(db.objectStoreNames).sort(), [...STORES].sort())) { reject(new Error('Unexpected stores')); return }
-    const tx = db.transaction(STORES, 'readonly'), stores = []
-    for (const name of STORES) {
+    let storeNames
+    try { storeNames = Object.keys(databaseSchema(db.version).stores) } catch (error) { reject(error); return }
+    if (!same(Array.from(db.objectStoreNames).sort(), [...storeNames].sort())) { reject(new Error('Unexpected stores')); return }
+    const tx = db.transaction(storeNames, 'readonly'), stores = []
+    for (const name of storeNames) {
       const s = tx.objectStore(name)
       const entry = { name, keyPath: s.keyPath, autoIncrement: s.autoIncrement, indexes: Array.from(s.indexNames, name => {
         const i = s.index(name); return { name, keyPath: i.keyPath, unique: i.unique, multiEntry: i.multiEntry }
@@ -55,7 +57,7 @@ export async function captureBackup({ flush, factory = indexedDB, origin = locat
   try { data = await readBackupDatabaseSnapshot(db) } finally { db.close() }
   const payload = await encode({ ...data, origin, databaseName: 'just-writing', capturedAt: Date.now() })
   const storeHashes = await Promise.all(data.stores.map(async s => ({ name: s.name, sha256: await hash(await encode(s)) })))
-  const envelope = { format: 'just-writing-backup', formatVersion: 1, payload, storeHashes, sha256: await hash({ payload, storeHashes }) }
+  const envelope = { format: 'just-writing-backup', formatVersion: databaseSchema(data.databaseVersion).formatVersion, payload, storeHashes, sha256: await hash({ payload, storeHashes }) }
   const file = new Blob([JSON.stringify(envelope)], { type: 'application/json' })
   await validateBackup(file) // Re-read the produced file bytes before returning.
   return file
@@ -63,10 +65,12 @@ export async function captureBackup({ flush, factory = indexedDB, origin = locat
 
 export async function validateBackup(file) {
   const e = JSON.parse(await file.text())
-  if (e.format !== 'just-writing-backup' || e.formatVersion !== 1 || e.sha256 !== await hash({ payload: e.payload, storeHashes: e.storeHashes })) throw new Error('Invalid backup integrity/format')
+  if (e.format !== 'just-writing-backup' || ![1, 2].includes(e.formatVersion) || e.sha256 !== await hash({ payload: e.payload, storeHashes: e.storeHashes })) throw new Error('Invalid backup integrity/format')
   const data = decode(e.payload)
   if (!same(await encode(data), e.payload)) throw new Error('Invalid or lossy backup encoding')
-  if (data.databaseName !== 'just-writing' || typeof data.origin !== 'string' || !Number.isInteger(data.databaseVersion) || data.databaseVersion < 1 || !same(data.stores.map(s => s.name), STORES)) throw new Error('Invalid backup metadata/schema')
+  const schema = databaseSchema(data.databaseVersion)
+  if (e.formatVersion !== schema.formatVersion || data.databaseName !== 'just-writing' || typeof data.origin !== 'string' || !Number.isInteger(data.databaseVersion) || data.databaseVersion < 1 || !same(data.stores.map(s => s.name), Object.keys(schema.stores))) throw new Error('Invalid backup metadata/schema')
+  if (!Array.isArray(e.storeHashes) || e.storeHashes.length !== data.stores.length) throw new Error('Invalid store integrity/count')
   for (const [i, s] of data.stores.entries()) {
     if (s.count !== s.records.length || e.storeHashes[i]?.name !== s.name || e.storeHashes[i]?.sha256 !== await hash(await encode(s))) throw new Error('Invalid store integrity/count')
   }
@@ -86,7 +90,7 @@ export async function restoreToNewDatabase(file, { factory = indexedDB } = {}) {
   isolated.add(name)
   try {
     await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORES, 'readwrite')
+      const tx = db.transaction(Object.keys(databaseSchema(data.databaseVersion).stores), 'readwrite')
       tx.oncomplete = resolve; tx.onabort = () => reject(tx.error || new Error('Restore aborted')); tx.onerror = () => {}
       try { for (const s of data.stores) for (const r of s.records) {
         const store = tx.objectStore(s.name)

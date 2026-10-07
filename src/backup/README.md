@@ -7,8 +7,10 @@ maintenance coordinator, including Console imports and Vite/HMR instances.
 Each browser document has its own coordinator and shares origin-local Web Locks
 and the explicit localStorage maintenance marker with other documents.
 
-Backup format `just-writing-backup`, version 1, remains compatible with earlier
-files. It preserves all four stores, all users, schema/indexes, primary keys,
+Backup format `just-writing-backup` supports version 1 / DB v4 (four stores)
+and version 2 / DB v5 (the same stores plus `publications`). New v5 checkpoints
+use format v2; capturing an existing v4 database preserves format v1 without
+upgrading it. It preserves all users, schema/indexes, primary keys,
 counts, DB version, origin, capture timestamp, unknown fields, missing/null and
 supported structured-clone values. Tagged graph encoding handles cycles/shared
 references, dates, bigint, special numbers, buffers/views, maps/sets and blobs.
@@ -29,7 +31,7 @@ Choose the saved file with the regular file input; its bytes must match the
 checkpoint, then UUID restore/reopen/full comparison must pass. Success exits
 the owned maintenance session and displays “Резервная копия проверена”.
 
-Checking an existing file validates its hashes and v4 structure, restores to a
+Checking an existing file validates its hashes and version-specific v4/v5 structure, restores to a
 fresh UUID database, reopens and compares it with that file. It never reads or
 compares the current working database. No working restore writer exists.
 Other origins are recorded as metadata, not silently rewritten.
@@ -121,3 +123,28 @@ a lost owner must be diagnosed rather than wiping the marker.
 Tests use in-memory storage/Web Locks and fake IndexedDB. The singleton regression
 imports distinct query URLs to reproduce the Console module-instance problem.
 No test opens the real browser database or requires private migration files.
+
+## Storage v5 compatibility
+
+The application schema upgrade v4 → v5 only creates `publications` and its
+indexes. It does not traverse, transform or rewrite the four existing stores.
+Publications have a `publicationId` key and indexes for owner/channel/time,
+reader channel/time, source lookup and unique owner/source-type/source-ID/range/
+channel identity. No publication writer or UI is introduced in this storage stage.
+
+`../storage/databaseSchema.js` defines the supported v4/v5 schema contracts.
+Every backup snapshot uses one readonly transaction over all stores required by
+its DB version, including all users and unknown publication fields. Unknown
+versions, mismatched format/schema combinations and missing/extra stores fail.
+User verification also checks exact key paths and indexes.
+
+A v1/v4 file is restored at version 4 into a fresh UUID database and compared
+exactly after reopen, without migration. A separate isolated migration test
+then upgrades that verified v4 copy to v5 and compares the old stores again,
+requiring an empty `publications` store. The exact restore proof and the upgrade
+proof are independent. No restore targets the working database.
+
+Stage A tests use isolated UUID names and fake IndexedDB only. Running this code
+in the application will request schema v5 through the normal database open path;
+the implementation and automated checks do not launch a working browser upgrade.
+Publication domain validation and repository/UI belong to the next stage.

@@ -5,21 +5,7 @@ import { bytesHash } from '../utils/files.js'
 import { parseDocument } from '../editor/document.js'
 import { parseSemanticMarkup } from '../editor/semanticSnapshot.js'
 
-const schema = {
-  settings: { keyPath: 'key', indexes: [] },
-  texts: { keyPath: 'textId', indexes: [
-    { name: 'userDay', keyPath: ['userId', 'dayKey'], unique: true, multiEntry: false },
-    { name: 'userDayId', keyPath: 'userDayId', unique: true, multiEntry: false },
-    { name: 'userId', keyPath: 'userId', unique: false, multiEntry: false },
-  ] },
-  userDays: { keyPath: 'userDayId', indexes: [
-    { name: 'userDay', keyPath: ['userId', 'dayKey'], unique: true, multiEntry: false },
-    { name: 'userId', keyPath: 'userId', unique: false, multiEntry: false },
-  ] },
-  wordCountSamples: { keyPath: 'sampleId', indexes: [
-    { name: 'userDayTime', keyPath: ['userDayId', 'timestamp'], unique: true, multiEntry: false },
-  ] },
-}
+import { databaseSchema } from '../storage/databaseSchema.js'
 
 export function assertBackupWriterReady(controller, status) {
   if (!controller || controller.composing || ['saving', 'error', 'loading', 'load-error'].includes(status) ||
@@ -27,15 +13,16 @@ export function assertBackupWriterReady(controller, status) {
 }
 
 export function assertCompatibleBackup(data) {
-  if (data.databaseVersion !== 4 || data.stores.length !== 4) throw new Error('Поддерживается резервная копия базы JW версии 4.')
+  const schema = databaseSchema(data.databaseVersion).stores
+  if (data.stores.length !== Object.keys(schema).length) throw new Error('Структура резервной копии несовместима с JW.')
   if (!Number.isFinite(data.capturedAt) || !Number.isFinite(new Date(data.capturedAt).getTime())) throw new Error('Некорректная дата создания резервной копии.')
   const rows = {}
   for (const store of data.stores) {
     const expected = schema[store.name]
-    if (!expected || store.keyPath !== expected.keyPath || store.autoIncrement !== false ||
+    if (!expected || store.keyPath !== expected.keyPath || store.autoIncrement !== expected.autoIncrement ||
       JSON.stringify([...store.indexes].sort((a, b) => a.name.localeCompare(b.name))
         .map(i => ({ name: i.name, keyPath: i.keyPath, unique: i.unique, multiEntry: i.multiEntry }))) !==
-      JSON.stringify(expected.indexes)) throw new Error('Структура резервной копии несовместима с JW.')
+      JSON.stringify([...expected.indexes].sort((a, b) => a.name.localeCompare(b.name)))) throw new Error('Структура резервной копии несовместима с JW.')
     rows[store.name] = store.records.map(record => {
       if (!record.value || typeof record.key !== 'string' || record.value[store.keyPath] !== record.key) throw new Error('Некорректные ключи записей резервной копии.')
       return record.value
@@ -83,6 +70,7 @@ export function createUserBackupService({ coordinator = maintenance, factory = g
       const restored = await verifyRestoredDatabase(file, name, { factory })
       return { filename: file.name, byteSize: file.size, sha256: await bytesHash(await file.arrayBuffer()),
         capturedAt: data.capturedAt, origin: data.origin, dbVersion: data.databaseVersion,
+        formatVersion: databaseSchema(data.databaseVersion).formatVersion,
         counts: restored.counts, verifiedFromDisk: true, restoreVerified: restored.verified,
         isolatedRestoreName: name, isolatedRestoreDeleted: restored.deleted }
     },

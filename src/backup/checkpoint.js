@@ -1,9 +1,11 @@
 import { maintenance } from '../runtime/maintenance.js'
 import { captureBackup, validateBackup, restoreToNewDatabase, verifyRestoredDatabase } from './backup.js'
 import { bytesHash } from '../utils/files.js'
+import { databaseSchema } from '../storage/databaseSchema.js'
 
 const metadata = (file, backup, sha256) => ({ filename: file.name ?? null, byteSize: file.size,
   sha256, capturedAt: backup.capturedAt, origin: backup.origin, dbVersion: backup.databaseVersion,
+  formatVersion: databaseSchema(backup.databaseVersion).formatVersion,
   counts: Object.fromEntries(backup.stores.map(s => [s.name, s.count])) })
 
 export async function createCheckpoint({ coordinator = maintenance, factory = indexedDB, origin = globalThis.location?.origin } = {}) {

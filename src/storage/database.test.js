@@ -36,7 +36,7 @@ function all(db, store) {
 
 test('fresh database creates empty userDays and texts', async () => {
   const db = await connectDatabase({ name: crypto.randomUUID(), now })
-  assert.equal(db.version, 4)
+  assert.equal(db.version, 5)
   assert.deepEqual(await all(db, 'wordCountSamples'), [])
   assert.deepEqual(await all(db, 'texts'), [])
   assert.deepEqual(await all(db, 'userDays'), [])
@@ -118,7 +118,7 @@ test('v2 migration adds day goal fields, preserves first achievement and does no
   db.close()
 })
 
-test('v3 to v4 creates empty sample history and leaves existing data intact on migration and reload', async () => {
+test('v3 to v5 creates empty sample history and leaves existing data intact on migration and reload', async () => {
   const name = crypto.randomUUID()
   const originals = {
     settings: { key: 'localProfile', userId: 'user', dailyWordGoal: 510 },
@@ -137,7 +137,7 @@ test('v3 to v4 creates empty sample history and leaves existing data intact on m
   })
   for (let repeat = 0; repeat < 2; repeat++) {
     const db = await connectDatabase({ name, now })
-    assert.equal(db.version, 4)
+    assert.equal(db.version, 5)
     assert.deepEqual(await all(db, 'wordCountSamples'), [])
     for (const store of Object.keys(originals)) assert.deepEqual(await all(db, store), [originals[store]])
     db.close()

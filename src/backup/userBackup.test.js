@@ -7,16 +7,18 @@ import { createUserBackupService, assertBackupWriterReady } from './userBackup.j
 import { captureBackup, validateBackup } from './backup.js'
 import { encode } from './backupCodec.js'
 import { bytesHash } from '../utils/files.js'
+import { createSchemaStore, databaseSchema } from '../storage/databaseSchema.js'
 
-async function fixture(flush = async () => {}) {
+async function fixture(flush = async () => {}, version = 4) {
   const factory = new IDBFactory(), sourceName = 'just-writing-backup-test-' + crypto.randomUUID(), opens = []
   const db = await new Promise(resolve => {
-    const r = factory.open(sourceName, 4)
+    const r = factory.open(sourceName, version)
     r.onupgradeneeded = () => {
       const settings = r.result.createObjectStore('settings', { keyPath: 'key' })
       const texts = r.result.createObjectStore('texts', { keyPath: 'textId' })
       const days = r.result.createObjectStore('userDays', { keyPath: 'userDayId' })
       const samples = r.result.createObjectStore('wordCountSamples', { keyPath: 'sampleId' })
+      if (version === 5) createSchemaStore(r.result, 'publications', databaseSchema(5).stores.publications)
       for (const s of [texts, days]) {
         s.createIndex('userDay', ['userId', 'dayKey'], { unique: true }); s.createIndex('userId', 'userId')
       }
@@ -143,4 +145,21 @@ test('IME, save pending/error and second tab block creation without a snapshot',
   await assert.rejects(f.service.create(), /close other application tabs/)
   assert.deepEqual(f.opens, [])
   await f.service.resume(); await other.exit()
+})
+
+test('v5 maintenance checkpoint and exact disk-file verification include publications and format version without modifying source', async () => {
+  const f = await fixture(async () => {}, 5)
+  const captured = await f.service.create()
+  assert.equal(captured.receipt.dbVersion, 5)
+  assert.equal(captured.receipt.formatVersion, 2)
+  assert.equal(captured.receipt.counts.publications, 0)
+  const before = await validateBackup(captured.file)
+  const file = new File([await captured.file.arrayBuffer()], 'v5-checkpoint.json')
+  const result = await f.service.verify(file, captured.receipt)
+  assert.equal(result.restoreVerified, true)
+  assert.equal(result.isolatedRestoreDeleted, true)
+  assert.equal(result.formatVersion, 2)
+  assert.equal(f.coordinator.status().localPhase, 'normal')
+  const after = await validateBackup(await captureBackup({ factory: f.factory, origin: 'https://backup.test', flush: async () => {} }))
+  assert.deepEqual(after.stores, before.stores)
 })

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { IDBFactory } from 'fake-indexeddb'
 import { TextSelection, AllSelection } from '@tiptap/pm/state'
 import { undo, redo, undoDepth } from '@tiptap/pm/history'
-import { transaction, openDatabase } from './database.js'
+import { transaction, openDatabase, DATABASE_VERSION } from './database.js'
 import { saveArchivePresentation } from './archivePresentationRepository.js'
 import { createArchiveController } from '../editor/archiveController.js'
 import { createDayEditorState } from '../editor/dayOperations.js'
@@ -172,7 +172,7 @@ test('physical UUID database closes and reopens with complete records intact and
   const db = await openDatabase()
   db.close()
   const reopened = await new Promise((resolve, reject) => {
-    const request = factory.open(databaseName, 4)
+    const request = factory.open(databaseName, DATABASE_VERSION)
     request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error)
   })
   try {

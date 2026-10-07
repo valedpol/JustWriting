@@ -32,3 +32,16 @@ test('unavailable or malformed metadata does not claim a successful backup', () 
   assert.equal(createLastVerifiedBackupStore({ getItem() { throw new Error('denied') } }).read(), null)
   assert.throws(() => createLastVerifiedBackupStore(null).save(metadata))
 })
+
+test('v2 receipt persists format version and fifth store count while legacy receipts remain readable', () => {
+  const entries = new Map()
+  const storage = { getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) }
+  const store = createLastVerifiedBackupStore(storage)
+  store.save(metadata)
+  assert.equal(store.read().dbVersion, 4)
+  assert.equal(Object.hasOwn(store.read(), 'formatVersion'), false)
+  store.save({ ...metadata, dbVersion: 5, formatVersion: 2, counts: { ...metadata.counts, publications: 3 } })
+  const reopened = createLastVerifiedBackupStore(storage).read()
+  assert.equal(reopened.formatVersion, 2)
+  assert.equal(reopened.counts.publications, 3)
+})

@@ -1,7 +1,9 @@
 import { maintenance } from '../runtime/maintenance.js'
 import { userDayFromText } from '../domain/userDay.js'
 
-export const DATABASE_VERSION = 4
+import { DATABASE_VERSION, databaseSchema, createSchemaStore } from './databaseSchema.js'
+
+export { DATABASE_VERSION }
 let connection
 
 // Options allow migration tests against isolated databases and a fixed clock.
@@ -9,15 +11,18 @@ export function connectDatabase(options = {}) {
   return maintenance.applicationWrite(() => connectUnfenced(options))
 }
 
-function connectUnfenced({ name = 'just-writing', now = Date.now() } = {}) {
+function connectUnfenced({ name = 'just-writing', now = Date.now(), factory = indexedDB } = {}) {
   return new Promise((resolve, reject) => {
     let migrationError
     let blocked = false
-    const request = indexedDB.open(name, DATABASE_VERSION)
+    const request = factory.open(name, DATABASE_VERSION)
     request.onupgradeneeded = (event) => {
       try { maintenance.assertSchemaWrite() } catch (error) { migrationError = error; request.transaction.abort(); return }
       const db = request.result
       const tx = request.transaction
+      if (event.oldVersion < 5) {
+        createSchemaStore(db, 'publications', databaseSchema(5).stores.publications)
+      }
       if (event.oldVersion < 4) {
         const samples = db.createObjectStore('wordCountSamples', { keyPath: 'sampleId' })
         samples.createIndex('userDayTime', ['userDayId', 'timestamp'], { unique: true })
