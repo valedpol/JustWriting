@@ -5,7 +5,7 @@ import ReadonlyDocument from './ReadonlyDocument.js'
 import { createArchiveController } from '../editor/archiveController.js'
 import { coversWholeText } from '../editor/nativeSelection.js'
 
-const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, metadataHost, scrollElement, onSaved, searchOccurrences, activeSearchId }, ref) {
+const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, metadataHost, scrollElement, onSaved, searchOccurrences, activeSearchId, layoutRevision }, ref) {
   const editor = useRef(null)
   const fallback = useRef(null)
   const [loaded] = useState(() => {
@@ -27,7 +27,7 @@ const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, me
   if (loaded.error) return <div ref={fallback}><ReadonlyDocument record={record} /></div>
   return <div className="archive-writing-entry">
     <WritingEditor ref={editor} controller={loaded.controller} active writing ready readonlyContent
-      searchOccurrences={searchOccurrences} activeSearchId={activeSearchId}
+      searchOccurrences={searchOccurrences} activeSearchId={activeSearchId} layoutRevision={layoutRevision}
       metadataHost={metadataHost} scrollElement={scrollElement} />
   </div>
 })

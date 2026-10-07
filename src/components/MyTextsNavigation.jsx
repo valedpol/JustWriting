@@ -32,6 +32,7 @@ export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, dr
       </button>)}
     </div>
     <button type="button" className="menu-item research-local-exit"
-      aria-label="Выйти из Моих текстов к Тексту сегодня" onClick={onExit}>←</button>
+      aria-label={searchOpen ? 'Вернуться к навигации Моих текстов' : 'Выйти из Моих текстов к Тексту сегодня'}
+      onClick={searchOpen ? () => onSearchOpen(false) : onExit}>←</button>
   </nav>
 }

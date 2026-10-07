@@ -32,6 +32,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   const periodChange = useRef(false)
   const resetResults = useRef(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [calendarYearHost, setCalendarYearHost] = useState(null)
   const [draftQuery, setDraftQuery] = useState('')
   const [activeQuery, setActiveQuery] = useState('')
   const [activeSearchId, setActiveSearchId] = useState(null)
@@ -279,13 +280,14 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   return <>{navigationHost ? createPortal(navigation, navigationHost) : navigation}<div className="editor-shell my-texts">
     {records ? <div className="archive-calendar-controls">
       <div className="archive-calendar-heading">
-      <button type="button" aria-expanded={calendarOpen} aria-controls="archive-calendar" onClick={() => setCalendarOpen(open => !open)}>Календарь</button>
+      <button type="button" aria-expanded={calendarOpen} aria-controls="archive-calendar" onMouseDown={event => event.preventDefault()} onClick={() => setCalendarOpen(open => !open)}>Календарь</button>
+      {calendarOpen ? <fieldset ref={setCalendarYearHost} className="research-time archive-calendar-years" disabled={changingPeriod} /> : null}
       {period ? <span className="archive-period">{periodLabel(period)} <button type="button" aria-label="Снять выбранный период" disabled={changingPeriod} onClick={() => changePeriod(null)}>×</button></span> : null}
       {activeQuery ? <span className="archive-period archive-search-criterion"><span title={activeQuery}>Поиск: {activeQuery}</span> <button type="button" aria-label="Снять поиск" disabled={changingPeriod} onClick={() => changeCriteria(period, '')}>×</button></span> : null}
       </div>
       {periodError ? <p role="alert">{periodError}</p> : null}
       {calendarOpen ? <fieldset id="archive-calendar" disabled={changingPeriod}>
-        <ArchiveCalendar entries={archiveCalendarEntries(records)}
+        <ArchiveCalendar entries={archiveCalendarEntries(records)} yearHost={calendarYearHost}
           period={period ?? records.at(-1)?.dayKey ?? new Date().toISOString().slice(0, 10)}
           currentKey={[...records.map(record => record.dayKey), new Date().toISOString().slice(0, 10)].sort().at(-1)}
           onSelect={changePeriod} />
@@ -311,7 +313,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
               <div className="saved-text" aria-label="Сохранённый текст, только для чтения">
                 <ArchiveWritingEntry ref={editor => { if (editor) editors.current.set(record.textId, editor); else editors.current.delete(record.textId) }}
                   searchOccurrences={searchResults?.occurrences.filter(item => item.textId === record.textId)} activeSearchId={effectiveActiveSearchId}
-                  record={record} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
+                  record={record} layoutRevision={calendarOpen} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
               </div>
             </> : null}
           </li>)}

@@ -15,6 +15,7 @@ import { semanticSuggestions } from '../editor/semanticSuggestions.js'
 import SemanticRail from './SemanticRail.jsx'
 import SemanticPicker, { SemanticCategories } from './SemanticPicker.jsx'
 import { searchDecorations } from '../editor/searchDecorations.js'
+import { stickySelectionPanelTop } from '../editor/selectionPanelGeometry.js'
 import './WritingEditor.css'
 
 const WritingEditor = forwardRef(function WritingEditor(props, ref) {
@@ -306,8 +307,9 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     window.addEventListener('resize', measure)
     const observer = new ResizeObserver(measure)
     observer.observe(host.current)
+    if (scroller) observer.observe(scroller)
     return () => { scroller?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); observer.disconnect() }
-  }, [tick, active, writing, metadataHost, panelOpen, controller, scrollElement, pointerSelecting])
+  }, [tick, active, writing, metadataHost, panelOpen, controller, scrollElement, pointerSelecting, props.layoutRevision])
 
   const chooseCategory = category => {
     const state = controller.state
@@ -355,15 +357,31 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       if (pointerSelection.current.active) return
       const selectionTop = view.coordsAtPos(view.state.selection.from, 1).top
       const panelHeight = element.getBoundingClientRect().height
-      // Insufficient space above the selection is a separate edge case:
-      // do not clamp the toolbar back over the selected text.
-      element.style.top = `${selectionTop - panelHeight}px`
+      // Archive toolbar stops inside its bounded viewport; other editors
+      // retain their existing position above the first selected line.
+      const top = selectionTop - panelHeight
+      const viewportTop = readonlyContent && scrollElement ? scrollElement.getBoundingClientRect().top : null
+      let panelTop = top
+      if (viewportTop !== null && top < viewportTop + 8) {
+        const archive = scrollElement.closest('.my-texts')
+        const boundary = archive?.querySelector('#archive-calendar .research-time')
+          ?? archive?.querySelector('.archive-calendar-heading')
+        const boundaryBottom = boundary?.getBoundingClientRect().bottom ?? viewportTop
+        const selection = view.dom.ownerDocument.getSelection()
+        const viewportBottom = scrollElement.getBoundingClientRect().bottom
+        const lines = selection?.rangeCount && view.dom.contains(selection.anchorNode) && view.dom.contains(selection.focusNode)
+          ? [...selection.getRangeAt(0).getClientRects()].filter(rect => rect.width > 0 && rect.height > 0 && rect.bottom > viewportTop && rect.top < viewportBottom)
+          : []
+        const firstVisibleTop = lines.length ? Math.max(viewportTop, Math.min(...lines.map(rect => rect.top))) : Infinity
+        panelTop = stickySelectionPanelTop(boundaryBottom, firstVisibleTop, panelHeight)
+      }
+      element.style.top = `${panelTop}px`
     }
     place()
     const observer = new ResizeObserver(place)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [panelVisible, panel, position, tick, writing])
+  }, [panelVisible, panel, position, tick, writing, readonlyContent, scrollElement])
   return <>
     <div className="writing-scroll"><div ref={host} className="writing-editor" onClick={event => event.stopPropagation()} /></div>
     {message && active ? <p className="editor-message" role="alert">{message}<button onClick={() => setMessage('')}>Закрыть</button></p> : null}

@@ -101,7 +101,7 @@ async function fixture(options = {}) {
   const ref = createRef()
   const root = createRoot(container)
   const render = async (writing = true, active = true) => act(async () => {
-    root.render(createElement(WritingEditor, { ref, controller, writing, active, ready: true, metadataHost: sidebar, searchOccurrences: options.searchOccurrences, activeSearchId: options.activeSearchId, onActivate() {}, readonlyContent: options.readonlyContent ?? false }))
+    root.render(createElement(WritingEditor, { ref, controller, writing, active, ready: true, metadataHost: sidebar, scrollElement: options.scrollElement, searchOccurrences: options.searchOccurrences, activeSearchId: options.activeSearchId, onActivate() {}, readonlyContent: options.readonlyContent ?? false }))
   })
   await render()
   return { controller, container, sidebar, ref, render, async close() { await act(async () => root.unmount()); container.remove(); sidebar.remove() } }
@@ -132,6 +132,11 @@ test('archive dates select only day text; collapse zones and collapse-all preser
   const originalElementFromPoint = document.elementFromPoint
   document.elementFromPoint = () => null
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.matches('.archive-calendar-heading, #archive-calendar .research-time') && this.closest('.my-texts')) {
+      const expanded = container.querySelector('[aria-controls="archive-calendar"]')?.getAttribute('aria-expanded') === 'true'
+      const bottom = this.matches('.archive-calendar-heading') ? 53 : expanded ? 173 : 53
+      return { ...rect, top: bottom - 28, bottom, height: 28 }
+    }
     if (this.classList.contains('archive-scroll')) return { ...rect, top: 100, bottom: 700, height: 600 }
     if (this.matches('li[data-text-id]')) {
       const siblings = [...this.parentElement.children]
@@ -164,6 +169,31 @@ test('archive dates select only day text; collapse zones and collapse-all preser
     await click(date)
     assert.equal(window.getSelection().toString(), entries()[0].querySelector('.ProseMirror').textContent)
     assert.ok(document.querySelector('[role="toolbar"]'))
+    const selectedText = window.getSelection().toString()
+    const selectedRange = window.getSelection().getRangeAt(0).cloneRange()
+    const mirror = entries()[0].querySelector('.ProseMirror')
+    const calendarToggle = container.querySelector('[aria-controls="archive-calendar"]')
+    area.getBoundingClientRect = () => ({ ...rect, top: calendarToggle.getAttribute('aria-expanded') === 'true' ? 220 : 100, bottom: 700 })
+    for (const expanded of [true, false, true, false]) {
+      const mouseDown = new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true })
+      await act(async () => {
+        calendarToggle.dispatchEvent(mouseDown)
+        calendarToggle.click()
+      })
+      assert.equal(mouseDown.defaultPrevented, true, 'calendar control must preserve editor focus and native selection')
+      assert.equal(calendarToggle.getAttribute('aria-expanded'), String(expanded))
+      assert.equal(document.activeElement, mirror)
+      assert.equal(window.getSelection().toString(), selectedText)
+      const range = window.getSelection().getRangeAt(0)
+      assert.equal(range.startContainer, selectedRange.startContainer)
+      assert.equal(range.startOffset, selectedRange.startOffset)
+      assert.equal(range.endContainer, selectedRange.endContainer)
+      assert.equal(range.endOffset, selectedRange.endOffset)
+      const panelRectTop = Number.parseFloat(document.querySelector('[role="toolbar"]').style.top)
+      const boundaryBottom = (container.querySelector('#archive-calendar .research-time') ?? container.querySelector('.archive-calendar-heading')).getBoundingClientRect().bottom
+      assert.equal(panelRectTop, boundaryBottom + 8, 'panel follows calendar/header boundary instead of scroll viewport')
+      assert.ok(panelRectTop + rect.height <= area.getBoundingClientRect().top - 4, 'complete panel remains in the free gap, above visible text')
+    }
     await click(date)
     assert.ok(window.getSelection().isCollapsed)
     assert.equal(document.querySelector('[role="toolbar"]'), null)
@@ -1022,6 +1052,13 @@ test('archive explicit search filters all entities, decorates without writes, pr
     assert.match(container.querySelector('.archive-search-criterion').textContent, /ЕЖ/)
     assert.equal(input().value, 'другой')
     assert.equal(active()[0].dataset.searchOccurrence, firstId)
+    await click(navigation.querySelector('[aria-label="Вернуться к навигации Моих текстов"]'))
+    assert.deepEqual([...navigation.querySelectorAll('.research-local-children button')].map(node => node.textContent), ['Поиск', 'Названия', 'Теги', 'Публикации'])
+    assert.match(container.querySelector('.archive-search-criterion').textContent, /ЕЖ/)
+    assert.equal(entries().length, 2)
+    await click(button('Поиск'))
+    assert.equal(input().value, 'другой')
+    assert.equal(active()[0].dataset.searchOccurrence, firstId)
     // Manual collapse is independent of results; navigation reveals only target.
     await click(sidebar.querySelector('.archive-actions button'))
     assert.equal(openCount(), 0)
@@ -1116,3 +1153,53 @@ test('search decorations coexist with readonly B/I/U, Undo/redo and semantic act
     assert.equal(f.ref.current.instance.dom.getAttribute('contenteditable'), 'false')
   } finally { await f.close() }
 })
+
+for (const backward of [false, true]) {
+  test(`archive selection toolbar sticks to viewport and returns above selection (${backward ? 'backward' : 'forward'})`, async () => {
+    const writer = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+    await writer.dispatch(writer.state.tr.insertText('Длинный архивный текст', 1))
+    const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+    const archive = createArchiveController(writer.snapshot.record)
+    const scroller = document.createElement('div')
+    scroller.getBoundingClientRect = () => ({ ...rect, top: 100, bottom: 700, height: 600 })
+    const f = await fixture({ controller: archive, readonlyContent: true, scrollElement: scroller })
+    try {
+      const view = f.ref.current.instance
+      let firstTop = 200
+      view.coordsAtPos = () => ({ ...rect, top: firstTop, bottom: firstTop + 31 })
+      await act(async () => f.ref.current.selectAll())
+      await act(async () => {
+        await archive.dispatch(archive.state.tr.setSelection(TextSelection.create(archive.state.doc, backward ? 20 : 2, backward ? 2 : 20)), 'selection')
+      })
+      const toolbar = document.querySelector('[role=toolbar]')
+      assert.ok(toolbar)
+      toolbar.getBoundingClientRect = () => ({ ...rect, height: 40 })
+      await act(async () => window.dispatchEvent(new dom.window.Event('resize')))
+      assert.equal(toolbar.style.top, '160px')
+      firstTop = -200
+      await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+      assert.equal(toolbar.style.top, '108px')
+      const savedRects = dom.window.Range.prototype.getClientRects
+      try {
+        dom.window.Range.prototype.getClientRects = () => [{ ...rect, top: -200, bottom: -180 }, { ...rect, top: 180, bottom: 200 }]
+        await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+        assert.equal(toolbar.style.top, '108px', 'toolbar stays directly below the current text viewport, above the visible line')
+      } finally { dom.window.Range.prototype.getClientRects = savedRects }
+      await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+      await click(document.querySelector('[aria-label="Жирный"]'))
+      await act(async () => archive.flush())
+      assert.equal(archive.snapshot.record.content, writer.snapshot.record.content)
+      assert.ok(archive.state.doc.rangeHasMark(2, 20, archive.state.schema.marks.bold))
+      assert.equal(document.querySelector('[role=toolbar]').style.top, '108px')
+      firstTop = 240
+      await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+      assert.equal(document.querySelector('[role=toolbar]').style.top, '200px')
+      await act(async () => {
+        window.getSelection().removeAllRanges()
+        document.dispatchEvent(new dom.window.Event('selectionchange'))
+      })
+      assert.equal(document.querySelector('[role=toolbar]'), null)
+      assert.equal(view.dom.getAttribute('contenteditable'), 'false')
+    } finally { await f.close() }
+  })
+}
