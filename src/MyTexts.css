@@ -77,8 +77,6 @@
 .archive-actions button:disabled { opacity: .4; cursor: default; }
 .archive-actions button:focus-visible { outline: 1px solid #777; outline-offset: 5px; }
 .archive-scroll { overflow-anchor: none; }
-.archive-collapse-strip { position: absolute; left: 0; right: 0; border: 0; padding: 0; background: transparent; cursor: pointer; }
-.archive-collapse-strip:focus-visible { outline: 1px solid #777; outline-offset: -2px; }
 .archive-sticky-date { z-index: 2; background: #fff; padding-bottom: 8px; }
 .archive-sticky-date > button { flex-wrap: wrap; row-gap: 2px; }
 .archive-rail-host { z-index: 1; }
@@ -119,3 +117,4 @@
 .archive-search-criterion { min-width: 0; max-width: 45%; }
 .archive-search-criterion > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .archive-search-criterion button { flex-shrink: 0; }
+.archive-publication-summary { font-size: 14px; font-weight: 400; }

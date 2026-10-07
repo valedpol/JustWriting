@@ -16,10 +16,14 @@ import SemanticRail from './SemanticRail.jsx'
 import SemanticPicker, { SemanticCategories } from './SemanticPicker.jsx'
 import { searchDecorations } from '../editor/searchDecorations.js'
 import { stickySelectionPanelTop } from '../editor/selectionPanelGeometry.js'
+import { useArchivePublications } from '../hooks/useArchivePublications.js'
+import { canonicalArchiveRange } from '../publications/archiveSource.js'
+import PublicationPicker from './PublicationPicker.jsx'
 import './WritingEditor.css'
 
 const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   const { controller, active, writing, ready, metadataHost, readonlyContent = false, scrollElement } = props
+  const publications = useArchivePublications(controller, readonlyContent)
   const latest = useRef(props)
   useLayoutEffect(() => { latest.current = props })
   const host = useRef(null)
@@ -252,7 +256,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       const pending = panelRef.current
       if (pending?.category && (pending.base !== snapshot.state || !snapshot.writable)) {
         setPanel(null)
-        if (pending.query.trim()) controller.keepDraft({ kind: pending.category, value: pending.query })
+        if (pending.query?.trim()) controller.keepDraft({ kind: pending.category, value: pending.query })
       }
       view.updateState(panelRef.current?.preview ?? snapshot.state)
       refresh()
@@ -311,6 +315,16 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     return () => { scroller?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); observer.disconnect() }
   }, [tick, active, writing, metadataHost, panelOpen, controller, scrollElement, pointerSelecting, props.layoutRevision])
 
+  const choosePublication = () => {
+    try {
+      const state = controller.state, record = controller.snapshot.record
+      const range = canonicalArchiveRange(state.doc, state.selection)
+      setPanel({ source: 'selection', from: state.selection.from, category: 'publication', base: state,
+        publicationSource: { sourceType: 'archive', sourceId: record.textId, sourceRevision: record.revision, coordinateVersion: 1, range,
+          archive: { userDayId: record.userDayId, dayKey: record.dayKey } } })
+      publications.reload().catch(() => {})
+    } catch (error) { report(error) }
+  }
   const chooseCategory = category => {
     const state = controller.state
     const pending = panelRef.current ?? { source: 'selection', from: state.selection.from }
@@ -341,7 +355,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     catch (error) { report(error) }
   }
   const state = controller?.state
-  const suggestions = panel?.category && controller ? semanticSuggestions([
+  const suggestions = panel?.category && panel.category !== 'publication' && controller ? semanticSuggestions([
     ...records.filter(record => record.textId !== controller.snapshot.record?.textId),
     { userId: controller.snapshot.context.userId, semanticMarkup: getSemanticMarkup(state) },
   ], controller.snapshot.context.userId, panel.category, panel.query) : []
@@ -352,7 +366,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     const element = toolbarRef.current
     const view = viewRef.current
     // Only the selection toolbar. Slash and category panels keep their geometry.
-    if (!panelVisible || panel || !element || !view) return
+    if (!panelVisible || (panel && panel.category !== 'publication') || !element || !view) return
     const place = () => {
       if (pointerSelection.current.active) return
       const selectionTop = view.coordsAtPos(view.state.selection.from, 1).top
@@ -395,12 +409,17 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
             onClick={() => command(toggleFirstTextMark(state.schema.marks[mark]))}>{['B', 'I', 'U'][i]}</button>)}<span aria-hidden="true">|</span>
         </> : null}
         <SemanticCategories panel={panel} chooseCategory={chooseCategory} />
+        {readonlyContent && selected && controller.snapshot.record?.userDayId ? <button aria-expanded={panel?.category === 'publication'}
+          onClick={choosePublication}>Опубликовать</button> : null}
       </div>
-      <SemanticPicker panel={panel} queryInput={queryInput} suggestions={suggestions} setPanel={setPanel}
-        applyValue={applyValue} cancelPanel={cancelPanel} />
+      {panel?.category === 'publication' ? <PublicationPicker source={panel.publicationSource} records={publications.records}
+        loading={publications.loading} loadError={publications.error} canCreate={canChangePresentation && panel.base === state}
+        create={publications.create} close={() => cancelPanel(true)} /> : <SemanticPicker panel={panel} queryInput={queryInput} suggestions={suggestions} setPanel={setPanel}
+        applyValue={applyValue} cancelPanel={cancelPanel} />}
     </div>, document.body) : null}
     <SemanticRail view={runtime?.view} controller={controller} active={active} writing={writing} ready={ready}
       metadataHost={metadataHost} scrollElement={scrollElement ?? runtime?.scroller} tick={tick}
+      publications={readonlyContent ? publications.records : undefined}
       searchOccurrences={props.searchOccurrences} activeSearchId={props.activeSearchId}
       onActivate={props.onActivate} report={report} allowChanges={!readonlyContent && canChangePresentation} allowRemoval={canChangePresentation} />
   </>

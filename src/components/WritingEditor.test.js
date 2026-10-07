@@ -64,6 +64,9 @@ test('readonly archive removes individual assignments and the last one persisten
     await settle(() => container.querySelector('.text-preview'))
     await click(container.querySelector('.text-preview').closest('button'))
     await settle(() => container.querySelector('.ProseMirror'))
+    await act(async () => transaction(['publications'], 'readonly', (tx, done) => {
+      const read = tx.objectStore('publications').getAll(); read.onsuccess = () => done(read.result)
+    }))
   }
   try {
     await reload()
@@ -222,7 +225,10 @@ test('archive dates select only day text; collapse zones and collapse-all preser
     assert.equal(sidebar.querySelector('.archive-sticky-date').style.top, '0px')
     await act(async () => { area.scrollTop = 490; area.dispatchEvent(new dom.window.Event('scroll')) })
     assert.equal(sidebar.querySelector('.archive-sticky-date').style.top, '-10px', 'date must leave with its entry')
-    await click(sidebar.querySelector('.archive-collapse-strip'))
+    assert.equal(sidebar.querySelector('.archive-collapse-strip'), null)
+    await click(sidebar.querySelector('.archive-day-metadata'))
+    assert.ok(entries()[0].querySelector('.ProseMirror'), 'blank right area does not collapse the record')
+    await click(entries()[0].querySelector('.archive-record-header'))
     assert.equal(entries()[0].querySelector('.ProseMirror'), null)
     assert.equal(sidebar.querySelector('.archive-actions'), null)
     await click(entries()[0].querySelector('.archive-preview-button'))
@@ -514,7 +520,7 @@ test('shared readonly editor offers metadata and guarded formatting while reject
       await archive.dispatch(archive.state.tr.setSelection(TextSelection.create(archive.state.doc, 1, 9)))
     })
     assert.ok(document.querySelector('button[aria-label="Жирный"]'))
-    assert.deepEqual([...document.querySelectorAll('.editor-panel-row button')].map(node => node.textContent), ['B', 'I', 'U', 'Тег', 'Название'])
+    assert.deepEqual([...document.querySelectorAll('.editor-panel-row button')].map(node => node.textContent), ['B', 'I', 'U', 'Тег', 'Название', 'Опубликовать'])
     assert.equal(button('Copy'), undefined)
     await click(button('Название'))
     await inputQuery('Офис')

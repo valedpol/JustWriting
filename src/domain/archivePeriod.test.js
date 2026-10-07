@@ -17,3 +17,16 @@ test('archive period uses saved keys, supports all/year/month/day/empty and does
   assert.equal(archiveCalendarEntries(records).size, 3)
   assert.equal(archiveCalendarEntries(records).get('2025-10-04').words, 0)
 })
+
+test('archive calendar uses saved historical goal/reached fields, never infers achievement from word count', () => {
+  const days = [
+    { dayKey: '2026-09-26', dailyWordGoal: 100, goalReached: true },
+    { dayKey: '2026-10-04', dailyWordGoal: 1, goalReached: false },
+  ]
+  const before = structuredClone({ records, days })
+  const entries = archiveCalendarEntries(records, days)
+  assert.equal(entries.get('2026-09-26').day, days[0])
+  assert.equal(entries.get('2026-10-04').day.goalReached, false)
+  assert.deepEqual(entries.get('2025-10-04').day, {})
+  assert.deepEqual({ records, days }, before)
+})

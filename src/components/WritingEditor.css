@@ -74,3 +74,8 @@
   .app-shell:has(.today-editor-shell:not([hidden])) .right-sidebar { grid-column: 2; }
   .writing-editor .ProseMirror { padding-inline: 18px; }
 }
+.publication-picker { position: absolute; top: calc(100% + 4px); left: 0; width: 240px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 12px; background: #fff; border: 1px solid #d9d9d9; box-shadow: 0 3px 12px #0000000d; }
+.publication-picker label { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.publication-picker p { margin: 8px 0; white-space: normal; }
+.publication-picker button:disabled { opacity: .45; cursor: default; }
+.publication-marker { flex-basis: 100%; font-size: 14px; font-weight: 400; }

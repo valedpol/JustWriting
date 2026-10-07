@@ -1,4 +1,6 @@
 import ArchiveWritingEntry from './components/ArchiveWritingEntry.jsx'
+import ArchivePublicationSummary from './components/ArchivePublicationSummary.jsx'
+import { listUserDays } from './storage/dayRepository.js'
 import ReadonlySemanticMarkup from './components/ReadonlySemanticMarkup.js'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -23,6 +25,7 @@ function dateLabel(key) {
 
 export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit }) {
   const [records, setRecords] = useState(null)
+  const [userDays, setUserDays] = useState([])
   const [expanded, setExpanded] = useState(() => new Set())
   const [failed, setFailed] = useState(false)
   const [period, setPeriod] = useState(null)
@@ -63,9 +66,10 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   useEffect(() => {
     if (!userId) return
     let cancelled = false
-    pendingWrites.current().then(() => listTexts(userId)).then((items) => {
+    pendingWrites.current().then(() => Promise.all([listTexts(userId), listUserDays(userId)])).then(([items, days]) => {
       if (!cancelled) {
         const ordered = [...items].sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+        setUserDays(days)
         setRecords(ordered)
         onTotalWords(ordered.reduce((total, record) => total + getWordCount(record.content), 0))
       }
@@ -287,7 +291,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       </div>
       {periodError ? <p role="alert">{periodError}</p> : null}
       {calendarOpen ? <fieldset id="archive-calendar" disabled={changingPeriod}>
-        <ArchiveCalendar entries={archiveCalendarEntries(records)} yearHost={calendarYearHost}
+        <ArchiveCalendar entries={archiveCalendarEntries(records, userDays)} yearHost={calendarYearHost}
           period={period ?? records.at(-1)?.dayKey ?? new Date().toISOString().slice(0, 10)}
           currentKey={[...records.map(record => record.dayKey), new Date().toISOString().slice(0, 10)].sort().at(-1)}
           onSelect={changePeriod} />
@@ -332,9 +336,6 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
           const top = position?.top ?? 0
           const bottom = position?.bottom ?? top
           return open ? <div key={record.textId}>
-            <button type="button" className="archive-collapse-strip"
-              style={{ top: Math.max(0, top), height: Math.max(0, Math.min(metadataLayout.height, bottom) - Math.max(0, top)) }}
-              aria-label={`Свернуть текст за ${dateLabel(record.dayKey)}`} onClick={() => toggleRecord(record)} />
             <ArchiveRailHost textId={record.textId} register={registerHost} onActive={() => { activeRecord.current = record.textId }} />
             <div className="archive-day-label archive-sticky-date"
               style={{ top: archiveDateTop(top, bottom, position?.dateHeight ?? 40) }}>
@@ -359,6 +360,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
           <span>{getWordCount(record.content).toLocaleString('ru-RU')} слов</span>
         </button>
           <ReadonlySemanticMarkup record={record} />
+          <ArchivePublicationSummary record={record} />
         </div>
         })}
       </div></>, metadataHost,

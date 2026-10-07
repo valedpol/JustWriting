@@ -22,6 +22,8 @@ let flushEditor = async () => {}
 globalThis.__archiveFlush = () => flushEditor()
 const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error',
   plugins: [{ name: 'archive-calendar-test', enforce: 'pre', transform(code, id) {
+    if (id.endsWith('/src/storage/dayRepository.js')) return 'export const listUserDays = async () => globalThis.__archiveDays ?? []'
+    if (id.endsWith('/src/storage/publicationRepository.js')) return 'export const listOwnPublications = async () => []; export const createPublications = async () => { throw new Error("No writes") }'
     if (id.endsWith('/src/storage/textRepository.js')) return 'export const listTexts = async () => globalThis.__archiveRecords'
     if (id.endsWith('/src/components/ArchiveWritingEntry.jsx')) return `import { forwardRef, useImperativeHandle } from 'react';
       export default forwardRef(function Entry({record}, ref) {
@@ -165,4 +167,23 @@ test('explicit search waits for pending save before excluding a selected editor;
     assert.match(container.querySelector('.archive-search-criterion').textContent, /Первый/)
     assert.equal(container.querySelector('[role=alert]').textContent, 'search save failed')
   } finally { await act(async () => root.unmount()); flushEditor = async () => {}; container.remove(); sidebar.remove() }
+})
+
+test('archive calendar renders saved goal achievement after compact layout, without reconstructing goals or touching data', async () => {
+  const days = [{ dayKey: '2026-09-26', dailyWordGoal: 100, goalReached: true },
+    { dayKey: '2026-10-03', dailyWordGoal: 1, goalReached: false }]
+  globalThis.__archiveDays = days
+  const before = structuredClone({ records, days })
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(createElement(MyTexts, { userId: 'u', flush: async () => {}, onTotalWords() {} })))
+    await act(async () => container.querySelector('[aria-controls="archive-calendar"]').click())
+    assert.equal(container.querySelector('[aria-label="3 октября 2026 г., есть текст"] .research-day-dot'), null)
+    await act(async () => [...container.querySelectorAll('[aria-label="Месяцы"] button')].find(button => button.textContent === 'Сентябрь').click())
+    const day = [...container.querySelectorAll('.research-day-button')].find(button => button.textContent === '26')
+    assert.ok(day.querySelector('.research-day-cell.has-text .research-day-dot'))
+    assert.ok(container.querySelector('.archive-calendar-heading [aria-label="Годы"]'))
+    assert.deepEqual({ records, days }, before)
+  } finally { delete globalThis.__archiveDays; await act(async () => root.unmount()); container.remove() }
 })

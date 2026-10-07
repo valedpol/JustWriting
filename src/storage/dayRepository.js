@@ -2,6 +2,13 @@ import { advanceDay, canWriteDay } from '../domain/grace.js'
 import { calculateUserDay } from '../domain/writingDay.js'
 import { transaction } from './database.js'
 
+export function listUserDays(userId) {
+  return transaction(['userDays'], 'readonly', (tx, done) => {
+    const request = tx.objectStore('userDays').index('userId').getAll(userId)
+    request.onsuccess = () => done(request.result)
+  })
+}
+
 export function loadUserDay(userId, dayKey) {
   return transaction(['userDays'], 'readonly', (tx, done) => {
     const request = tx.objectStore('userDays').index('userDay').get([userId, dayKey])

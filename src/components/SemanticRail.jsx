@@ -1,13 +1,15 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { focusView } from '../editor/focusView.js'
+import { publicationLabels } from '../publications/labels.js'
 import SearchHighlights from './SearchHighlights.jsx'
 import { TextSelection } from '@tiptap/pm/state'
 import { getSemanticMarkup, removeSemanticMarkup, setSemanticRange } from '../editor/semanticHistory.js'
 
+const noPublications = []
 const labels = { tag: 'Тег', title: 'Название' }
 
-export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges, searchOccurrences = [], activeSearchId }) {
+export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges, searchOccurrences = [], activeSearchId, publications = noPublications }) {
   const railRef = useRef(null)
   const [rail, setRail] = useState([])
   const state = controller?.state
@@ -19,6 +21,14 @@ export default function SemanticRail({ view, controller, active, writing, ready,
       for (const item of getSemanticMarkup(view.state).sort((a, b) => a.anchor - b.anchor)) {
         const key = item.kind === 'tag' && item.source === 'selection' && item.range
           ? `range:${item.range.from}:${item.range.to}` : `item:${item.id}`
+        if (groups.has(key)) groups.get(key).items.push(item)
+        else groups.set(key, { key, items: [item] })
+      }
+      for (const publication of publications) {
+        const range = publication.source.range
+        if (range.from > view.state.doc.content.size) continue
+        const key = `publication-range:${range.from}:${range.to}`
+        const item = { id: publication.publicationId, kind: 'publication', anchor: range.from, channel: publication.channel }
         if (groups.has(key)) groups.get(key).items.push(item)
         else groups.set(key, { key, items: [item] })
       }
@@ -36,7 +46,7 @@ export default function SemanticRail({ view, controller, active, writing, ready,
     observer.observe(view.dom)
     observer.observe(metadataHost)
     return () => { scrollElement?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); observer.disconnect() }
-  }, [view, active, writing, metadataHost, scrollElement, tick, state])
+  }, [view, active, writing, metadataHost, scrollElement, tick, state, publications])
   useLayoutEffect(() => {
     // Measure after wrapping, so a tall group cannot overlap the next one.
     let previousBottom = -Infinity
@@ -54,7 +64,7 @@ export default function SemanticRail({ view, controller, active, writing, ready,
   return <>
     {metadataHost && controller && active ? createPortal(<div ref={railRef} className="semantic-rail" aria-label="Системная разметка">
       {rail.map(group => <div className="semantic-group" key={group.key} style={{ top: group.baseTop }}>
-        {group.items.map(item => <div className="semantic-label" key={item.id}>
+        {group.items.map(item => item.kind === 'publication' ? <div className="publication-marker" key={item.id}>↗ {publicationLabels[item.channel]}</div> : <div className="semantic-label" key={item.id}>
         <button className="semantic-value" data-kind={item.kind} disabled={!ready} title={item.range ? 'Выделить размеченный фрагмент' : 'Вторая граница ещё не задана'}
           onMouseDown={event => event.preventDefault()} onClick={event => {
             event.stopPropagation()
