@@ -57,10 +57,16 @@ export function makePublication({ publicationId, userId, channel, publishedAt, p
 export function immutablePublication(record) { return freeze(structuredClone(record)) }
 
 // A reader receives no source/provenance or owner-management payload.
-export function feedPublicationProjection(record) {
+export function feedPublicationProjection(record, publicAuthor) {
+  if (record.authorVisibility === 'visible' && (typeof publicAuthor?.displayName !== 'string' || !publicAuthor.displayName.trim() ||
+      typeof publicAuthor.publicId !== 'string' || !publicAuthor.publicId || typeof publicAuthor.allowNameDisclosure !== 'boolean')) {
+    throw new Error('Public author unavailable')
+  }
   return freeze({ publicationId: record.publicationId, channel: record.channel, publishedAt: record.publishedAt,
     snapshot: copySnapshot(record.snapshot), authorVisibility: record.authorVisibility,
-    ...(record.authorVisibility === 'visible' ? { author: { userId: record.author.userId, displayName: record.author.displayName } } : {}) })
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(record.source?.archive?.dayKey ?? '') ? { writtenOn: record.source.archive.dayKey } : {}),
+    ...(record.authorVisibility === 'visible' ? { author: { publicId: publicAuthor.publicId, displayName: publicAuthor.displayName,
+      allowNameDisclosure: publicAuthor.allowNameDisclosure, displayLabel: publicAuthor.displayName + (publicAuthor.allowNameDisclosure ? ' ›' : '') } } : {}) })
 }
 export function sortPublications(records) {
   return records.sort((a, b) => b.publishedAt - a.publishedAt || (a.publicationId < b.publicationId ? -1 : a.publicationId > b.publicationId ? 1 : 0))

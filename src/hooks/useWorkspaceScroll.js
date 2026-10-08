@@ -3,7 +3,7 @@ import { routeWorkspaceWheel } from '../domain/workspaceScroll.js'
 
 export function useWorkspaceScroll(workspaceRef, section) {
   useEffect(() => {
-    const selector = section === 'archive' ? '.archive-scroll' : section === 'settings' ? '.settings-content' : section === 'research' ? '.research-content' : section === 'today' ? '.writing-scroll' : null
+    const selector = section === 'archive' || section === 'feed' ? '.archive-scroll' : section === 'settings' ? '.settings-content' : section === 'research' ? '.research-content' : section === 'today' ? '.writing-scroll' : null
     const workspace = workspaceRef.current
     if (!workspace || !selector) return
     const onWheel = (event) => {

@@ -17,6 +17,7 @@ const { loadProfile, saveText } = await import('../storage/textRepository.js')
 const { resolveToday, endWritingSession } = await import('../storage/dayRepository.js')
 const { sampleWordCount } = await import('../storage/wordCountRepository.js')
 const { saveProfileSetting } = await import('../storage/settingsRepository.js')
+const { loadPublicIdentity } = await import('../storage/publicIdentityRepository.js')
 const { saveSemanticMarkup } = await import('../storage/semanticRepository.js')
 
 test('real repository gate drains accepted writes and blocks every ordinary repository write plus schema opening', async () => {
@@ -36,7 +37,9 @@ test('real repository gate drains accepted writes and blocks every ordinary repo
     const attempted = await Promise.allSettled([
       loadProfile(), resolveToday({ userId: 'u', timeZone: 'Europe/Moscow', dayStartMinutes: 0, dayPolicyVersion: 2 }),
       endWritingSession('u', 'session'), sampleWordCount('u', 'day', 'session'),
-      saveProfileSetting('u', 'displayName', 'Changed'), saveSemanticMarkup('u', { textId: 't', userId: 'u' }, []),
+      saveProfileSetting('u', 'displayName', 'Changed'),
+      saveProfileSetting('u', 'publicNickname', 'Changed'), saveProfileSetting('u', 'allowNameDisclosure', true),
+      loadPublicIdentity('u'), saveSemanticMarkup('u', { textId: 't', userId: 'u' }, []),
       saveText({ userId: 'u', dayKey: '2027-03-10' }, null, 'New text'),
       connectDatabase({ name: 'just-writing-import-test-' + crypto.randomUUID() }),
       transaction(['settings'], 'readwrite', () => assert.fail('transaction callback must not run')),

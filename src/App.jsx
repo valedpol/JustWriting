@@ -4,6 +4,7 @@ import { useTodayText } from './hooks/useTodayText'
 import { getWordCount, wordCountNoun } from './domain/wordCount'
 import MyTexts from './MyTexts'
 import Settings from './Settings'
+import ReaderFeed from './components/ReaderFeed.jsx'
 import Research from './Research'
 import ResearchNavigation from './components/ResearchNavigation'
 import WordCounter from './components/WordCounter'
@@ -91,12 +92,17 @@ function App() {
   }
 
   return (
-    <div className={`app-shell screen-${screenMode}${section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
+    <div className={`app-shell screen-${screenMode}${section === 'feed' ? ' archive-page feed-page' : section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
       <header className="topbar">
         <div className="brand-block">Just Writing</div>
 
         <div className={`meta-block${graceUntil ? ' is-grace' : ''}`}>
-          {screenMode === SCREEN_MODES.interface ? (
+          {section === 'feed' ? (
+            <div className="public-page-header">
+              <span className="public-page-title">Общая страница</span>
+              <span className="public-page-date">{formatLongDate(now)}</span>
+            </div>
+          ) : screenMode === SCREEN_MODES.interface ? (
             <>
               <div className="meta-identity">
                 <span className="meta-user">{authorName}</span>
@@ -206,7 +212,7 @@ function App() {
             <button type="button" className={`menu-item${section === 'today' ? ' is-active' : ''}`} aria-current={section === 'today' ? 'page' : undefined} onClick={() => openSection('today')}>
               Текст сегодня
             </button>
-            <button type="button" className="menu-item">
+            <button type="button" className={`menu-item${section === 'feed' ? ' is-active' : ''}`} aria-current={section === 'feed' ? 'page' : undefined} onClick={() => openSection('feed')}>
               Общая страница
             </button>
             <button type="button" className="menu-item">
@@ -227,7 +233,7 @@ function App() {
               writing={screenMode !== SCREEN_MODES.interface} metadataHost={archiveMetadataHost}
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
-          {section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
+          {section === 'feed' ? <ReaderFeed key={userId} userId={userId} metadataHost={archiveMetadataHost} statusHost={settingsStatusHost} /> : section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
             onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <MyTexts navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} onPublicationSummary={setPublicationSummary} /> : null}
         </section>
 

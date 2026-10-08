@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb'
 import { connectDatabase } from './database.js'
 import { createPublicationRepository } from './publicationRepository.js'
+import { createPublicIdentityRepository } from './publicIdentityRepository.js'
 import { createArchiveSourceAdapter } from './archiveSourceAdapter.js'
 import { legacyToDocument, parseDocument } from '../editor/document.js'
 import { bytesHash } from '../utils/files.js'
@@ -45,8 +46,13 @@ async function fixture() {
   })
   const profile = (userId, authorVisibility) => runTransaction(['settings'], 'readwrite', tx => {
     tx.objectStore('settings').put({ key: 'localProfile', userId, displayName: `Name ${userId}`, createdAt: 1 })
-    if (authorVisibility) tx.objectStore('settings').put({ key: `publicProfile:${userId}`, userId, authorVisibility })
+    if (authorVisibility) {
+      const read = tx.objectStore('settings').get(`publicProfile:${userId}`)
+      read.onsuccess = () => tx.objectStore('settings').put({ ...read.result, key: `publicProfile:${userId}`, userId, authorVisibility })
+    }
   })
+  const identities = createPublicIdentityRepository({ runTransaction })
+  for (const userId of users) await identities.loadPublicIdentity(userId)
   const repo = createPublicationRepository({ runTransaction, flush: async () => {}, now: () => 100 })
   const source = (i = 0, range = { from: 0, to: parseDocument(texts[i].document).content.size }) => ({
     sourceType: 'archive', sourceId: texts[i].textId, sourceRevision: 3, coordinateVersion: 1, range,
@@ -119,6 +125,10 @@ test('three users combine in reader Feed, stable newest-first order, private pro
   for (const p of feed) {
     assert.equal('source' in p, false); assert.equal('userId' in p, false)
     if (p.authorVisibility === 'hidden') assert.equal('author' in p, false)
+    else {
+      assert.equal('userId' in p.author, false)
+      assert.match(p.author.displayName, /^Автор-[0-9A-HJKMNP-TV-Z]{4}$/)
+    }
   }
   for (const user of users) assert.equal((await f.repo.listOwnPublications(user, 'feed')).length, 1)
   await f.profile(users[0], 'hidden')
@@ -130,6 +140,57 @@ test('three users combine in reader Feed, stable newest-first order, private pro
   const later = createPublicationRepository({ runTransaction: f.runTransaction, flush: async () => {}, now: () => 102 })
   await later.createPublications(users[0], { source: f.source(0, { from: 1, to: 5 }), channels: ['feed'] })
   assert.equal((await f.repo.listFeedPublications())[0].publishedAt, 102)
+})
+
+test('live public nicknames update every visible publication without rewriting snapshots; hidden identity remains excluded and aliases survive reopen/backup', async t => {
+  const f = await fixture(); t.after(f.close)
+  const identities = createPublicIdentityRepository({ runTransaction: f.runTransaction })
+  for (let i = 0; i < 3; i++) {
+    await f.profile(users[i], i === 1 ? 'hidden' : 'visible')
+    await identities.savePublicNickname(users[i], i === 1 ? 'Hidden nickname' : `Nickname ${i}`)
+    await create(f, ['profile', 'feed', 'internet'], i)
+  }
+  await f.profile(users[0], 'visible')
+  await create(f, ['feed'], 0, { from: 1, to: 6 })
+  const original = await f.all()
+  const ownFeedIds = original.publications.filter(p => p.channel === 'feed' && p.userId === users[0]).map(p => p.publicationId)
+  const fallback = (await identities.loadPublicIdentity(users[0])).alias
+  await identities.savePublicNickname(users[0], '  Updated nickname  ')
+  let feed = await f.repo.listFeedPublications()
+  for (const item of feed) {
+    if (ownFeedIds.includes(item.publicationId)) assert.equal(item.author.displayName, 'Updated nickname')
+    else if (item.authorVisibility === 'visible') assert.equal(item.author.displayName, 'Nickname 2')
+    else assert.equal('author' in item, false)
+    assert.equal('userId' in item, false)
+    if (item.author) assert.deepEqual(Object.keys(item.author), ['publicId', 'displayName', 'allowNameDisclosure', 'displayLabel'])
+  }
+  assert.equal(JSON.stringify(feed).includes('Hidden nickname'), false)
+  assert.equal(JSON.stringify(feed).includes('Name user-'), false)
+  const publicId = (await identities.loadPublicIdentity(users[0])).publicId
+  await identities.savePublicIdentitySetting(users[0], 'allowNameDisclosure', true)
+  const disclosed = await f.repo.listFeedPublications()
+  for (const item of disclosed.filter(p => ownFeedIds.includes(p.publicationId))) {
+    assert.equal(item.author.publicId, publicId)
+    assert.equal(item.author.displayLabel, 'Updated nickname ›')
+    assert.equal('fullName' in item.author, false)
+  }
+  feed = disclosed
+  const saved = await f.all()
+  for (const store of names.filter(n => n !== 'settings')) assert.deepEqual(saved[store], original[store])
+  assert.deepEqual(saved.settings.find(s => s.key === 'localProfile'), original.settings.find(s => s.key === 'localProfile'))
+  await assert.rejects(identities.savePublicNickname(users[2], 'Not owner'), /Профиль изменился/)
+  await f.reopen()
+  assert.equal((await identities.loadPublicIdentity(users[0])).nickname, 'Updated nickname')
+  assert.deepEqual(await f.repo.listFeedPublications(), feed)
+  const factory = { open: (name, version) => f.factory.open(name === 'just-writing' ? f.name : name, version),
+    databases: async () => (await f.factory.databases()).map(d => ({ ...d, name: d.name === f.name ? 'just-writing' : d.name })),
+    deleteDatabase: name => f.factory.deleteDatabase(name) }
+  const backup = await captureBackup({ factory, flush: async () => {}, origin: 'https://test.invalid' })
+  const restored = await restoreToNewDatabase(backup, { factory })
+  assert.equal((await verifyRestoredDatabase(backup, restored, { factory })).verified, true)
+  assert.deepEqual(await f.all(), saved)
+  await identities.savePublicNickname(users[0], '')
+  assert.ok((await f.repo.listFeedPublications()).filter(p => ownFeedIds.includes(p.publicationId)).every(p => p.author.displayName === fallback))
 })
 
 test('source edits and author/settings changes never change existing snapshots; Profile ignores author visibility', async t => {
@@ -251,4 +312,21 @@ test('default repository uses registered live flush and production transaction b
   assert.deepEqual(await f.all(), before)
   const connection = await openDatabase()
   connection.close()
+})
+
+
+test('legacy authors initialize random public identity once on reader lookup without changing publications or source stores', async t => {
+  const f = await fixture(); t.after(f.close)
+  await create(f, ['feed'])
+  await f.runTransaction(['settings'], 'readwrite', tx => tx.objectStore('settings').delete(`publicProfile:${users[0]}`))
+  const before = await f.all()
+  const feed = await f.repo.listFeedPublications()
+  assert.match(feed[0].author.displayName, /^Автор-[0-9A-HJKMNP-TV-Z]{4}$/)
+  assert.equal(feed[0].author.allowNameDisclosure, false)
+  const initialized = await f.all()
+  for (const store of names.filter(n => n !== 'settings')) assert.deepEqual(initialized[store], before[store])
+  assert.deepEqual(initialized.settings.find(s => s.key === 'localProfile'), before.settings.find(s => s.key === 'localProfile'))
+  await f.reopen()
+  assert.deepEqual(await f.repo.listFeedPublications(), feed)
+  assert.deepEqual(await f.all(), initialized)
 })

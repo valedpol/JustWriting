@@ -52,19 +52,47 @@ by publishedAt descending and publicationId ascending (codepoint order).
 records in the same stable order as a public reader projection: snapshot,
 publicationId, channel, publishedAt and authorVisibility. It exposes an author
 only when visibility is visible, and never exposes source/provenance or private
-owner payload. It does not read source/settings for rendering snapshots.
+owner payload. Snapshot content never reads current source. Public author names
+resolve from current public-profile settings through the shared identity repository.
+Missing identity fields are initialized once in a maintenance-fenced settings-only
+transaction; subsequent reads are readonly. Publication objects are never rewritten.
 
 `deletePublication(userId, publicationId)` deletes exactly one existing owned
 record, after checking ownership in the same transaction. Missing/foreign IDs
 reject. Republish is a new record/ID/time; no ghost, undo or source mutation.
 
-Feed/Internet author snapshot is read from `settings.localProfile` (matching
-userId required), with displayName preserved at publication time. Profile has
+Feed/Internet legacy private author metadata is read from `settings.localProfile`
+(matching userId required), but its internal name/ID are never reader fields. Profile has
 neither author nor authorVisibility: its identity comes from the profile page.
 The future public-profile settings record is keyed `publicProfile:${userId}`,
-with `userId` and `authorVisibility: 'visible' | 'hidden'`. Absent visibility
-reads as visible; no defaults or settings records are written here. UI and
-settings editing are deferred to later stages.
+with `userId`, `authorVisibility: 'visible' | 'hidden'`, optional `publicNickname`,
+random `publicId`, random `publicAlias` (e.g. `Автор-7K3M`) and boolean
+`allowNameDisclosure` (default false). Initialization preserves all existing fields
+and re-reads inside the write transaction to serialize concurrent first loads.
+Absent visibility reads as visible; visibility is captured only for new publications.
+Nickname editing lives in Settings → Profile and changes no publication objects.
+`resolvePublicIdentity` is the shared live-name resolver for Feed and future public
+Profile/Internet views. An empty nickname uses the persisted random alias;
+neither alias nor publicId is derived from internal userId. PublicId groups authors
+independently of nickname changes/collisions. DisplayLabel adds ` ›` only when
+name disclosure is allowed. Reader payload never includes the internal/full name;
+the future disclosure layer must check current consent before exposing it.
+
+Nickname comparison uses trim → NFC → Unicode lowercase → NFC; display spelling
+is preserved (apart from edge whitespace). Saving a nickname checks all available
+`publicProfile:*` records in the same settings write transaction and rejects a
+collision owned by another publicId with `Этот никнейм уже занят.` Empty nicknames
+are not reserved; clearing retains publicId and the existing alias.
+
+There is no global identity directory/server in local v1. This check covers only
+identities available in this IndexedDB (including multi-user fixtures), not all JW
+users, other devices or other origins. A future server identity repository must
+atomically reserve the comparison key under a unique constraint, bound to publicId,
+and release the old key in the same transaction when changing/clearing it. A client
+preflight check cannot establish global availability. The server must use the same
+versioned normalization contract; publication snapshots are never renamed.
+Public settings persist in the existing settings store and full backup without a
+schema or backup-format change. Author-visibility UI remains deferred.
 
 Factories accept a transaction runner, flush, clock and ID generator for
 isolated tests. Default exports use the existing storage/maintenance boundary.
@@ -92,3 +120,41 @@ delegates to the existing owner-safe delete API and never changes source data.
 After functional acceptance of stage D, consider a subtly distinct reading
 presentation for published snapshots: this is a space for showing texts, apart
 from writing or revisiting the archive. No new visual style is decided here.
+
+
+## Reader Feed (stage E2)
+
+Reader Feed opens through the existing global `Общая страница`, independently
+of Archive → Publications → Feed. There is no additional global `Лента` item. It consumes
+`listFeedPublications()` through `listReaderFeedPublications(userId)`, which adds
+only the local `isOwn` presentation flag from the owner repository. Even anonymous
+own publications are recognized; foreign publications have no remove action.
+Deletion always passes through `deletePublication` and its owner validation.
+Returning to owner libraries re-reads the store and naturally updates counts.
+
+The public projection allowlists `writtenOn` from the saved archive provenance,
+not from the current source. It carries no source IDs, ranges, revisions or private
+semantic metadata. Shared `PublicationView`, `PublicationPreview` and
+`ReadonlyDocument` render both owner libraries and Reader Feed; all cards start
+collapsed. Reader Feed uses the accepted frame, scroll and right metadata rail. Author
+identity, the `●` marker, disclosure and owner actions all live in that rail.
+`●` marks a publication owned by the current user in Reader Feed.
+The reading font matches JW/owner publications; content uses a moderately wider
+side inset (44px versus the archive’s 28px, returning to 28px on narrow screens).
+
+Author filters use publicId, never nickname. Returning browser focus refreshes
+live identities while retaining this filter. Hidden authors remain `Автор`, with
+no public key, name-disclosure action or author filter. Name disclosure permission
+and Feed authorVisibility are independent policies.
+
+`loadDisclosedAuthorName(publicId)` is readonly and checks current consent both
+before and after lookup. Current-user names come from localProfile; other local
+fixture names come from an injected author-profile provider. No historical name
+from publication.author is used. Unavailable names have no disclosure action.
+The UI reveals a name only after clicking `›`, and can hide it again. A future
+server author-profile source can serve the same contract without Public Profile UI.
+
+`src/testFixtures/readerFeed.js` requires an explicit isolated transaction runner;
+it never seeds or opens a database on import. Fixtures cover three authors,
+visible/hidden authorship, nickname/alias, disclosure, multiple snapshots and
+same-time ordering. Production navigation never imports or installs fixtures.

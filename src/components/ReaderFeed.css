@@ -1,0 +1,14 @@
+.reader-feed { --reader-text-inset: 44px; display: flex; flex: 1; min-width: 0; min-height: 0; }
+/* Same single-column reading layout and typography as Owner Publications/JW.
+   16px more space per side than the archive; no new text font or line-height. */
+.reader-feed .owner-publications-content, .reader-feed .owner-publications-scroll > h1 { padding-inline: var(--reader-text-inset); }
+.reader-feed-heading { display: flex; align-items: baseline; gap: 32px; }
+.reader-feed .owner-publications-scroll:not(.has-heading) > .owner-publications-content { padding-top: var(--reading-header-top-space); }
+.reader-publication-author { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; color: #262626; font: 500 16px/1.45 system-ui, sans-serif; overflow-wrap: anywhere; }
+.reader-publication-author button, .reader-feed-heading button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.reader-publication-author button:focus-visible, .reader-feed-heading button:focus-visible { outline: 1px solid #777; outline-offset: 4px; }
+.reader-own-marker { font-size: 10px; align-self: center; }
+.reader-author-disclosed { flex-basis: 100%; color: #777; font-size: 13px; font-weight: 400; }
+@media (max-width: 600px) {
+  .reader-feed { --reader-text-inset: 28px; }
+}

@@ -59,8 +59,16 @@ test('reader projection allowlists fields even if restored records contain extra
   record.snapshot.semanticMarkup = [{ secret: true }]
   record.snapshot.tags = ['Private']
   record.author.deviceId = 'Private'
-  const reader = feedPublicationProjection(record)
+  const reader = feedPublicationProjection(record, { publicId: 'public-id', displayName: 'Public nickname', allowNameDisclosure: true, fullName: 'Private full name', userId: 'Private', deviceId: 'Private' })
   assert.equal('semanticMarkup' in reader.snapshot, false)
   assert.equal('tags' in reader.snapshot, false)
   assert.equal('deviceId' in reader.author, false)
+  assert.equal('userId' in reader.author, false)
+  assert.equal(reader.author.displayName, 'Public nickname')
+  assert.equal(reader.writtenOn, record.source.archive.dayKey)
+  assert.equal('source' in reader, false)
+  assert.equal(reader.author.displayLabel, 'Public nickname ›')
+  assert.equal(reader.author.publicId, 'public-id')
+  assert.equal('fullName' in reader.author, false)
+  assert.throws(() => feedPublicationProjection(record), /Public author/)
 })

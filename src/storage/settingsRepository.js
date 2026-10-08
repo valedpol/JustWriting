@@ -1,8 +1,10 @@
 import { initialDayGoal, updateDayGoal } from '../domain/wordGoal.js'
 import { transaction } from './database.js'
 import { calculateUserDay, changeDayStart } from '../domain/writingDay.js'
+import { savePublicIdentitySetting } from './publicIdentityRepository.js'
 
 export function saveProfileSetting(userId, field, value, now = Date.now()) {
+  if (['publicNickname', 'allowNameDisclosure'].includes(field)) return savePublicIdentitySetting(userId, field, value)
   if (!['displayName', 'dayStartMinutes', 'dailyWordGoal'].includes(field)) return Promise.reject(new Error('Настройка пока недоступна.'))
   if (field === 'displayName' && (typeof value !== 'string' || !value.trim())) return Promise.reject(new Error('Имя не должно быть пустым.'))
   if (field === 'dailyWordGoal' && value !== null && (!Number.isSafeInteger(value) || value <= 0)) return Promise.reject(new Error('Введите целое положительное число или оставьте поле пустым.'))

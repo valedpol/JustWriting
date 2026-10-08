@@ -32,7 +32,7 @@ test('Research opens in interface, rejects writing and exits explicitly to today
 })
 
 test('timer shortcut composes existing section and mode transitions from every interface page', () => {
-  for (const section of ['research', 'settings', 'archive', 'today']) {
+  for (const section of ['research', 'settings', 'archive', 'feed', 'today']) {
     const before = { section, screenMode: modes.interface }
     const today = section === 'today' ? before : reduce(before, { type: 'section', section: 'today' })
     const writing = reduce(today, { type: 'mode', mode: modes.standard })
@@ -46,7 +46,7 @@ test('reload restores only the top-level section, for every page; invalid or una
   const values = new Map()
   const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) }
   assert.deepEqual(restoreScreen(storage), initialScreen)
-  for (const section of ['today', 'archive', 'research', 'settings']) {
+  for (const section of ['today', 'archive', 'research', 'feed', 'settings']) {
     rememberSection(section, storage)
     assert.deepEqual(restoreScreen(storage), { section, screenMode: modes.interface })
     assert.equal(values.size, 1, 'no period, writing mode or editor state is persisted')

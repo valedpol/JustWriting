@@ -187,6 +187,24 @@
   text-align: left;
 }
 
+.feed-page .public-page-header {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.feed-page .public-page-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.feed-page .public-page-date {
+  color: #777;
+}
+
 .screen-interface .meta-identity {
   display: contents;
 }

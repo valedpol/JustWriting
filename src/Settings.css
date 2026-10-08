@@ -44,3 +44,5 @@
 .backup-last-verified { margin-top: 24px; font-size: .9rem; }
 .backup-last-verified strong { display: block; margin-bottom: 6px; font-weight: 500; }
 .backup-data summary { cursor: pointer; color: #777; }
+
+.settings-content input[type="checkbox"] { width: auto; justify-self: start; accent-color: #777; }

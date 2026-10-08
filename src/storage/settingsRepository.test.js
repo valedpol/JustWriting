@@ -5,6 +5,8 @@ import { transaction } from './database.js'
 import { loadProfile, saveText, loadText, listTexts } from './textRepository.js'
 import { resolveToday, loadUserDay } from './dayRepository.js'
 import { saveProfileSetting } from './settingsRepository.js'
+import { loadPublicIdentity } from './publicIdentityRepository.js'
+import { openDatabase } from './database.js'
 import { parseDayStart, formatDayStart, changeDayStart, calculateUserDay } from '../domain/writingDay.js'
 
 const at = Date.parse
@@ -20,6 +22,34 @@ test('name is persisted and no text is created by a setting', async () => {
   assert.equal((await loadProfile()).displayName, 'Новое имя')
   await assert.rejects(saveProfileSetting(profile.userId, 'displayName', ' '), /пустым/)
   assert.equal((await loadProfile()).displayName, 'Новое имя')
+  assert.deepEqual(await listTexts(profile.userId), [])
+})
+
+test('public nickname persists separately, preserves internal profile and other public settings, and accepts empty values without uniqueness rules', async () => {
+  const { profile } = await setup()
+  const key = `publicProfile:${profile.userId}`
+  const publicSettings = { key, userId: profile.userId, authorVisibility: 'hidden', unknown: { keep: true } }
+  await transaction(['settings'], 'readwrite', tx => tx.objectStore('settings').put(publicSettings))
+  const beforeProfile = await loadProfile()
+  const readDay = () => transaction(['userDays'], 'readonly', (tx, done) => {
+    const read = tx.objectStore('userDays').getAll(); read.onsuccess = () => done(read.result)
+  })
+  const beforeDays = await readDay()
+  const fallback = await loadPublicIdentity(profile.userId)
+  const result = await saveProfileSetting(profile.userId, 'publicNickname', '  Публичный ник  ')
+  assert.deepEqual(result.profile, beforeProfile)
+  assert.deepEqual(result.publicProfile, { ...publicSettings, publicId: fallback.publicId, publicAlias: fallback.alias, allowNameDisclosure: false, publicNickname: 'Публичный ник' })
+  assert.equal((await loadPublicIdentity(profile.userId)).displayName, 'Публичный ник')
+  await assert.rejects(saveProfileSetting('other-user', 'publicNickname', 'Foreign'), /Профиль изменился/)
+  await assert.rejects(saveProfileSetting(profile.userId, 'publicNickname', 12), /текстом/)
+  ;(await openDatabase()).onversionchange()
+  assert.equal((await loadPublicIdentity(profile.userId)).nickname, 'Публичный ник')
+  await saveProfileSetting(profile.userId, 'displayName', 'Новое внутреннее имя')
+  assert.equal((await loadPublicIdentity(profile.userId)).displayName, 'Публичный ник', 'internal name changes do not change the public name')
+  await saveProfileSetting(profile.userId, 'publicNickname', '')
+  assert.equal((await loadPublicIdentity(profile.userId)).displayName, fallback.alias)
+  assert.deepEqual(await loadProfile(), { ...beforeProfile, displayName: 'Новое внутреннее имя' })
+  assert.deepEqual(await readDay(), beforeDays)
   assert.deepEqual(await listTexts(profile.userId), [])
 })
 
@@ -200,4 +230,26 @@ test('goal updates before and after achievement track latest goal while preservi
     assert.deepEqual(await loadUserDay(profile.userId, today.context.dayKey), day)
     previous = day
   }
+})
+
+
+test('random public identity initializes once concurrently, persists consent after reopen and never changes the internal profile', async () => {
+  const { profile } = await setup()
+  const beforeProfile = await loadProfile()
+  const identities = await Promise.all(Array.from({ length: 8 }, () => loadPublicIdentity(profile.userId)))
+  for (const identity of identities) assert.deepEqual(identity, identities[0])
+  assert.equal(identities[0].allowNameDisclosure, false)
+  assert.notEqual(identities[0].publicId, profile.userId)
+  await saveProfileSetting(profile.userId, 'allowNameDisclosure', true)
+  ;(await openDatabase()).onversionchange()
+  const identity = await loadPublicIdentity(profile.userId)
+  assert.equal(identity.publicId, identities[0].publicId)
+  assert.equal(identity.alias, identities[0].alias)
+  assert.equal(identity.displayLabel, identity.alias + ' ›')
+  assert.equal(identity.allowNameDisclosure, true)
+  assert.deepEqual(await loadProfile(), beforeProfile)
+  await assert.rejects(saveProfileSetting(profile.userId, 'allowNameDisclosure', 'true'), /boolean/)
+  await assert.rejects(saveProfileSetting('other', 'allowNameDisclosure', true), /Профиль изменился/)
+  assert.deepEqual(await loadPublicIdentity(profile.userId), identity)
+  assert.equal((await openDatabase()).version, 5)
 })

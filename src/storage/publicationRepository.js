@@ -1,4 +1,5 @@
 import { transaction } from './database.js'
+import { createPublicIdentityRepository } from './publicIdentityRepository.js'
 import { createArchiveSourceAdapter } from './archiveSourceAdapter.js'
 import { assertChannels, makePublication, immutablePublication, feedPublicationProjection,
   sortPublications, publicProfileSettingsKey } from '../publications/model.js'
@@ -42,11 +43,23 @@ export function createPublicationRepository({ runTransaction = transaction, flus
         read.onsuccess = () => done(sortPublications(read.result).map(immutablePublication))
       })
     },
-    listFeedPublications() {
-      return runTransaction(['publications'], 'readonly', (tx, done) => {
+    async listFeedPublications() {
+      const records = await runTransaction(['publications'], 'readonly', (tx, done) => {
         const read = tx.objectStore('publications').index('channelTime').getAll(IDBKeyRange.bound(['feed', 0], ['feed', Number.MAX_SAFE_INTEGER]))
-        read.onsuccess = () => done(sortPublications(read.result).map(feedPublicationProjection))
+        read.onsuccess = () => done(sortPublications(read.result))
       })
+      const identities = createPublicIdentityRepository({ runTransaction })
+      const profiles = new Map()
+      for (const userId of new Set(records.filter(record => record.authorVisibility === 'visible').map(record => record.userId))) {
+        profiles.set(userId, await identities.loadPublicIdentity(userId))
+      }
+      return records.map(record => feedPublicationProjection(record, profiles.get(record.userId)))
+    },
+    async listReaderFeedPublications(userId) {
+      if (typeof userId !== 'string' || !userId) throw new Error('Invalid owner')
+      const feed = await this.listFeedPublications()
+      const owned = new Set((await this.listOwnPublications(userId, 'feed')).map(record => record.publicationId))
+      return feed.map(record => Object.freeze({ ...record, isOwn: owned.has(record.publicationId) }))
     },
     deletePublication(userId, publicationId) {
       if (typeof userId !== 'string' || !userId || typeof publicationId !== 'string' || !publicationId) throw new Error('Invalid owner/publication')
@@ -67,3 +80,5 @@ export const createPublications = (...args) => repository.createPublications(...
 export const listOwnPublications = (...args) => repository.listOwnPublications(...args)
 export const listFeedPublications = (...args) => repository.listFeedPublications(...args)
 export const deletePublication = (...args) => repository.deletePublication(...args)
+
+export const listReaderFeedPublications = (...args) => repository.listReaderFeedPublications(...args)
