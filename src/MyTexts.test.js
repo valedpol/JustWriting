@@ -23,7 +23,7 @@ globalThis.__archiveFlush = () => flushEditor()
 const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error',
   plugins: [{ name: 'archive-calendar-test', enforce: 'pre', transform(code, id) {
     if (id.endsWith('/src/storage/dayRepository.js')) return 'export const listUserDays = async () => globalThis.__archiveDays ?? []'
-    if (id.endsWith('/src/storage/publicationRepository.js')) return 'export const listOwnPublications = async () => []; export const createPublications = async () => { throw new Error("No writes") }'
+    if (id.endsWith('/src/storage/publicationRepository.js')) return 'export const listOwnPublications = async () => []; export const deletePublication = async () => { throw new Error("No writes") }; export const createPublications = async () => { throw new Error("No writes") }'
     if (id.endsWith('/src/storage/textRepository.js')) return 'export const listTexts = async () => globalThis.__archiveRecords'
     if (id.endsWith('/src/components/ArchiveWritingEntry.jsx')) return `import { forwardRef, useImperativeHandle } from 'react';
       export default forwardRef(function Entry({record}, ref) {
@@ -186,4 +186,33 @@ test('archive calendar renders saved goal achievement after compact layout, with
     assert.ok(container.querySelector('.archive-calendar-heading [aria-label="Годы"]'))
     assert.deepEqual({ records, days }, before)
   } finally { delete globalThis.__archiveDays; await act(async () => root.unmount()); container.remove() }
+})
+
+test('publication navigation returns channel → archive → today and preserves calendar period', async () => {
+  globalThis.__archiveRecords = records
+  const container = document.createElement('div'), host = document.createElement('aside')
+  document.body.append(container, host)
+  const root = createRoot(container)
+  let exits = 0
+  const find = text => [...container.querySelectorAll('nav button')].find(node => (node.querySelector('.owner-publication-channel-label')?.textContent ?? node.textContent) === text)
+  const click = async node => { assert.ok(node); await act(async () => node.click()) }
+  try {
+    await act(async () => root.render(createElement(MyTexts, { userId: 'u', flush: async () => {}, onTotalWords() {}, onExit() { exits++ }, metadataHost: host })))
+    await click(container.querySelector('[aria-controls=archive-calendar]'))
+    await click([...container.querySelectorAll('[aria-label=Годы] button')].find(node => node.textContent === '2026'))
+    const criterion = container.querySelector('[aria-label="Снять выбранный период"]').textContent
+    await click(find('Публикации'))
+    assert.ok(container.querySelector('.my-texts').hidden)
+    for (const label of ['Профиль', 'Лента', 'Интернет']) assert.ok(find(label))
+    await click(find('Лента'))
+    assert.ok(container.querySelector('[aria-label="Публикации: Лента"]').textContent.includes('Здесь пока нет публикаций.'))
+    await click(find('←'))
+    assert.equal(container.querySelector('[aria-label="Публикации: Лента"]'), null)
+    assert.equal(find('Профиль'), undefined)
+    assert.equal(container.querySelector('.my-texts').hidden, false)
+    assert.ok(find('Поиск'))
+    assert.equal(container.querySelector('[aria-label="Снять выбранный период"]').textContent, criterion)
+    assert.equal(exits, 0)
+    await click(find('←')); assert.equal(exits, 1)
+  } finally { await act(async () => root.unmount()); container.remove(); host.remove() }
 })

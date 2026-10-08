@@ -1,11 +1,20 @@
+const channels = [['profile', 'Профиль'], ['feed', 'Лента'], ['internet', 'Интернет']]
 const tools = ['Поиск', 'Названия', 'Теги', 'Публикации']
 const noun = (n, forms) => forms[n % 100 >= 11 && n % 100 <= 14 ? 2 : n % 10 === 1 ? 0 : n % 10 >= 2 && n % 10 <= 4 ? 1 : 2]
 
-export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, draft, onDraft, onSubmit, results, activeIndex, onLocate, busy }) {
+export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, draft, onDraft, onSubmit, results, activeIndex, onLocate, busy, publicationPage, publicationCounts, onPublicationsOpen, onPublicationChannel, onPublicationsBack }) {
   return <nav className="side-menu research-local-menu my-texts-local-menu" aria-label="Мои тексты">
     <span className="menu-item">Мои тексты</span>
     <div className="research-local-children">
-      {searchOpen ? <>
+      {publicationPage ? <>
+        <span className="menu-item">Публикации</span>
+        <div className="owner-publication-channels">
+          {channels.map(([channel, label]) => <button type="button" key={channel} className={`menu-item${publicationPage === channel ? ' is-active' : ''}`}
+            aria-current={publicationPage === channel ? 'true' : undefined} disabled={busy} onClick={() => onPublicationChannel(channel)}>
+            <span className="owner-publication-channel-label">{label}</span><span className="owner-publication-count">{publicationCounts?.[channel] ?? 0}</span>
+          </button>)}
+        </div>
+      </> : searchOpen ? <>
         <span className="menu-item is-active" aria-current="true">Поиск</span>
         <form className="archive-search-form" onSubmit={event => { event.preventDefault(); onSubmit() }}>
           <input aria-label="Поиск по архиву" value={draft} onChange={event => onDraft(event.target.value)} />
@@ -26,13 +35,14 @@ export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, dr
           </div> : null}
         </div> : null}
       </> : tools.map(label => <button key={label} type="button"
-        className={`menu-item${label === 'Публикации' ? ' my-texts-publications' : ''}`} disabled={label !== 'Поиск'}
-        onClick={label === 'Поиск' ? () => onSearchOpen(true) : undefined}>
+        className={`menu-item${label === 'Публикации' ? ' my-texts-publications' : ''}`} disabled={!['Поиск', 'Публикации'].includes(label) || busy}
+        onClick={label === 'Поиск' ? () => onSearchOpen(true) : label === 'Публикации' ? onPublicationsOpen : undefined}>
         {label}
       </button>)}
     </div>
     <button type="button" className="menu-item research-local-exit"
-      aria-label={searchOpen ? 'Вернуться к навигации Моих текстов' : 'Выйти из Моих текстов к Тексту сегодня'}
-      onClick={searchOpen ? () => onSearchOpen(false) : onExit}>←</button>
+      disabled={busy}
+      aria-label={publicationPage ? 'Вернуться в Мои тексты' : searchOpen ? 'Вернуться к навигации Моих текстов' : 'Выйти из Моих текстов к Тексту сегодня'}
+      onClick={publicationPage ? onPublicationsBack : searchOpen ? () => onSearchOpen(false) : onExit}>←</button>
   </nav>
 }

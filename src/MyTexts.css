@@ -1,4 +1,5 @@
-.my-texts { --archive-text-inset: 28px; flex: 1; padding: 28px 0; color: #171717; }
+.my-texts, .owner-publications { --reading-header-top-space: 28px; --reading-header-bottom-space: 12px; --reading-content-gap: 35px; }
+.my-texts { --archive-text-inset: 28px; flex: 1; padding: 28px 0; padding-top: var(--reading-header-top-space); color: #171717; }
 .my-texts ul { list-style: none; padding: 0; margin: 0; }
 .my-texts li { position: relative; }
 .my-texts li + li { margin-top: 63px; }
@@ -71,7 +72,7 @@
 .archive-record-header::before { content: ''; position: absolute; inset: -32px 0 0; }
 .my-texts .archive-record-info { position: relative; display: block; width: 100%; padding-inline: var(--archive-text-inset); font: bold 20px/1.55 Georgia, 'Times New Roman', serif; }
 .my-texts .archive-preview-button { display: block; width: 100%; }
-.archive-actions-space { flex-shrink: 0; height: 35px; }
+.archive-actions-space { flex-shrink: 0; height: var(--reading-content-gap); }
 .archive-actions { position: absolute; left: 18px; right: 18px; padding-bottom: 16px; font: 13px/1.45 system-ui, sans-serif; }
 .archive-actions button { border: 0; background: transparent; padding: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .archive-actions button:disabled { opacity: .4; cursor: default; }
@@ -85,7 +86,7 @@
 .archive-semantic-title { font-size: 15px; font-weight: 600; }
 .archive-semantic-tags { font-size: 14px; font-weight: 400; }
 
-.archive-calendar-controls { flex-shrink: 0; padding: 0 var(--archive-text-inset) 12px; font-size: .85rem; }
+.archive-calendar-controls { flex-shrink: 0; padding: 0 var(--archive-text-inset) 12px; padding-bottom: var(--reading-header-bottom-space); font-size: .85rem; }
 .archive-calendar-heading { display: flex; align-items: center; height: 28px; line-height: 20px; gap: 24px; }
 .archive-calendar-heading > button { color: #555; font: inherit; }
 .archive-period { display: inline-flex; gap: 10px; align-items: center; line-height: 20px; }

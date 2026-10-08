@@ -1,7 +1,6 @@
 # Publications v1 — model and repository (stage B)
 
-No publication UI or automatic publication creation is installed. The v5 store
-and its unique index were added in stage A. These APIs perform ordinary fenced
+The v5 store and its unique index were added in stage A. These APIs perform ordinary fenced
 application transactions and cannot write while maintenance is active.
 
 ## API
@@ -75,3 +74,21 @@ contract, not protection from direct DevTools writes to IndexedDB.
 Tests use only independent fake IndexedDB UUID databases, including fixtures for
 three userIds, concurrency conflicts, multi-channel rollback, source preservation,
 full reopen and backup v2 restore/reopen/compare of repository-created records.
+
+## Owner libraries (stage D)
+
+Archive navigation opens the first nonempty own channel (Profile, Feed, Internet).
+When all are empty it opens Profile with the general empty message; explicitly
+selecting a channel uses its channel empty message. Back returns directly to the
+preserved archive; Publications is a navigation group, not a separate root view.
+Channel counts and published word totals derive from stored owner snapshots.
+Cards start collapsed, show measured first/last three visual lines, and expand
+the saved B/I/U snapshot without reading the current source. Writing date uses
+the captured archive dayKey; the right rail uses publishedAt. Confirmed removal
+delegates to the existing owner-safe delete API and never changes source data.
+
+## Deferred owner-view UX
+
+After functional acceptance of stage D, consider a subtly distinct reading
+presentation for published snapshots: this is a space for showing texts, apart
+from writing or revisiting the archive. No new visual style is decided here.

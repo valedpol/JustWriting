@@ -23,7 +23,7 @@ import './WritingEditor.css'
 
 const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   const { controller, active, writing, ready, metadataHost, readonlyContent = false, scrollElement } = props
-  const publications = useArchivePublications(controller, readonlyContent)
+  const publications = useArchivePublications(controller, readonlyContent && active)
   const latest = useRef(props)
   useLayoutEffect(() => { latest.current = props })
   const host = useRef(null)

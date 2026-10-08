@@ -1,3 +1,6 @@
+import OwnerPublications from './components/OwnerPublications.jsx'
+import { listOwnPublications } from './storage/publicationRepository.js'
+import { PUBLICATION_CHANNELS } from './publications/model.js'
 import ArchiveWritingEntry from './components/ArchiveWritingEntry.jsx'
 import ArchivePublicationSummary from './components/ArchivePublicationSummary.jsx'
 import { listUserDays } from './storage/dayRepository.js'
@@ -23,7 +26,24 @@ function dateLabel(key) {
   return key.split('-').reverse().join('.')
 }
 
-export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit }) {
+export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit, onPublicationSummary }) {
+  const [publicationPage, setPublicationPage] = useState(null)
+  const [publicationEntryEmpty, setPublicationEntryEmpty] = useState(false)
+  const [publicationBusy, setPublicationBusy] = useState(false)
+  const [publicationCounts, setPublicationCounts] = useState(null)
+  const [publicationWords, setPublicationWords] = useState({})
+  const updatePublicationWords = useCallback((channel, wordCount) => {
+    setPublicationWords(previous => previous[channel] === wordCount ? previous : { ...previous, [channel]: wordCount })
+  }, [])
+  useEffect(() => {
+    onPublicationSummary?.(publicationPage ? {
+      channel: publicationPage,
+      wordCount: publicationWords[publicationPage] ?? null,
+    } : null)
+  }, [publicationPage, publicationWords, onPublicationSummary])
+  const updatePublicationCount = useCallback((channel, count) => {
+    setPublicationCounts(previous => previous?.[channel] === count ? previous : { ...previous, [channel]: count })
+  }, [])
   const [records, setRecords] = useState(null)
   const [userDays, setUserDays] = useState([])
   const [expanded, setExpanded] = useState(() => new Set())
@@ -278,10 +298,32 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     editors.current.get(record.textId)?.toggleSelection()
   }
 
+  const openPublications = async () => {
+    setChangingPeriod(true); setPeriodError('')
+    try {
+      await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+      await pendingWrites.current()
+      const counts = Object.fromEntries(await Promise.all(PUBLICATION_CHANNELS.map(async channel =>
+        [channel, (await listOwnPublications(userId, channel)).length])))
+      setPublicationCounts(counts)
+      setPublicationWords({})
+      setPublicationEntryEmpty(PUBLICATION_CHANNELS.every(channel => counts[channel] === 0))
+      window.getSelection()?.removeAllRanges()
+      // Entry choice only. Later count changes never navigate away from a channel.
+      setPublicationPage(PUBLICATION_CHANNELS.find(channel => counts[channel] > 0) ?? 'profile')
+    } catch { setPeriodError('Не удалось завершить сохранение или загрузить публикации. Повторите вход.') }
+    finally { setChangingPeriod(false) }
+  }
   const navigation = <MyTextsNavigation onExit={onExit} searchOpen={searchOpen} onSearchOpen={setSearchOpen}
     draft={draftQuery} onDraft={setDraftQuery} onSubmit={() => changeCriteria(period, draftQuery.trim())}
-    results={searchResults} activeIndex={activeIndex} onLocate={locateOccurrence} busy={changingPeriod || !records} />
-  return <>{navigationHost ? createPortal(navigation, navigationHost) : navigation}<div className="editor-shell my-texts">
+    results={searchResults} activeIndex={activeIndex} onLocate={locateOccurrence} busy={changingPeriod || publicationBusy || !records} publicationPage={publicationPage} publicationCounts={publicationCounts}
+    onPublicationsOpen={openPublications} onPublicationChannel={channel => {
+      setPublicationEntryEmpty(false)
+      if (channel !== publicationPage) updatePublicationWords(channel, null)
+      setPublicationPage(channel)
+    }}
+    onPublicationsBack={() => setPublicationPage(null)} />
+  return <>{navigationHost ? createPortal(navigation, navigationHost) : navigation}<div className="editor-shell my-texts" hidden={!!publicationPage}>
     {records ? <div className="archive-calendar-controls">
       <div className="archive-calendar-heading">
       <button type="button" aria-expanded={calendarOpen} aria-controls="archive-calendar" onMouseDown={event => event.preventDefault()} onClick={() => setCalendarOpen(open => !open)}>Календарь</button>
@@ -317,14 +359,14 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
               <div className="saved-text" aria-label="Сохранённый текст, только для чтения">
                 <ArchiveWritingEntry ref={editor => { if (editor) editors.current.set(record.textId, editor); else editors.current.delete(record.textId) }}
                   searchOccurrences={searchResults?.occurrences.filter(item => item.textId === record.textId)} activeSearchId={effectiveActiveSearchId}
-                  record={record} layoutRevision={calendarOpen} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
+                  record={record} active={!publicationPage} layoutRevision={calendarOpen} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
               </div>
             </> : null}
           </li>)}
         </ul> : <p>{activeQuery ? 'Совпадений нет.' : period ? 'В выбранном периоде текстов нет.' : 'Сохранённых текстов пока нет.'}</p>}
     </div>
   </div>
-    {metadataHost && metadataLayout && records ? createPortal(
+    {!publicationPage && metadataHost && metadataLayout && records ? createPortal(
       <>
       {expanded.size > 0 ? <div className="archive-actions" style={{ top: metadataLayout.actionsTop }}>
         <button type="button" onClick={collapseAll}>Схлопнуть все тексты</button>
@@ -365,5 +407,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
         })}
       </div></>, metadataHost,
     ) : null}
+    {publicationPage ? <OwnerPublications key={`${userId}:${publicationPage}`} userId={userId} channel={publicationPage} onBusyChange={setPublicationBusy} onCountChange={updatePublicationCount} onWordCountChange={updatePublicationWords} metadataHost={metadataHost}
+      emptyMessage={publicationEntryEmpty ? 'Публикаций нет.' : undefined} /> : null}
   </>
 }

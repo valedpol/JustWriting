@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import './App.css'
 import { useTodayText } from './hooks/useTodayText'
-import { getWordCount } from './domain/wordCount'
+import { getWordCount, wordCountNoun } from './domain/wordCount'
 import MyTexts from './MyTexts'
 import Settings from './Settings'
 import Research from './Research'
@@ -39,6 +39,7 @@ function App() {
   useEffect(() => { rememberSection(section) }, [section])
   const isToday = section === 'today'
   const [archiveWords, setArchiveWords] = useState(null)
+  const [publicationSummary, setPublicationSummary] = useState(null)
   const [archiveNavigationHost, setArchiveNavigationHost] = useState(null)
   const [archiveMetadataHost, setArchiveMetadataHost] = useState(null)
   const [settingsStatusHost, setSettingsStatusHost] = useState(null)
@@ -66,7 +67,7 @@ function App() {
     editorRef.current?.finishComposition()
     editorRef.current?.cancelPanel()
     endWriting()
-    if (nextSection === 'archive' && section !== 'archive') setArchiveWords(null)
+    if (nextSection === 'archive' && section !== 'archive') { setArchiveWords(null); setPublicationSummary(null) }
     dispatchScreen({ type: 'section', section: nextSection })
   }
   const setWritingScreenMode = nextMode => {
@@ -227,7 +228,7 @@ function App() {
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
           {section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
-            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <MyTexts navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} /> : null}
+            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <MyTexts navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} onPublicationSummary={setPublicationSummary} /> : null}
         </section>
 
         <aside className="right-sidebar" ref={setArchiveMetadataHost} />
@@ -238,7 +239,8 @@ function App() {
           {isToday ? <>
             <WordCounter count={currentDayWords} goal={localProfile?.dailyWordGoal} />
           <span className="footer-status-text" role="status" title={error || 'Локальное хранение на этом устройстве'}>{status === 'loading' ? 'Загружаю' : status === 'saving' ? 'Сохраняю' : status === 'error' || status === 'load-error' ? 'Ошибка сохранения' : status === 'saved' ? 'Сохранено' : ''}</span>
-          </> : section === 'archive' ? <>
+          </> : section === 'archive' ? publicationSummary ? publicationSummary.channel ?
+            <span className="footer-status-text" role="status">Опубликовано {publicationSummary.wordCount ?? '…'} {wordCountNoun(publicationSummary.wordCount ?? 0)}</span> : null : <>
             <span className="footer-status-text">Написано</span>
             <span>{archiveWords ?? '…'} слов</span>
           </> : <span ref={setSettingsStatusHost} />}
