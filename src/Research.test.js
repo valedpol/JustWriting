@@ -9,7 +9,7 @@ import { createLastVerifiedBackupStore } from './backup/lastVerifiedBackup.js'
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true, url: 'https://research.test' })
 for (const key of ['window', 'document', 'HTMLElement']) globalThis[key] = dom.window[key]
 const calendarStyle = document.createElement('style')
-calendarStyle.textContent = readFileSync(new URL('./components/ArchiveCalendar.css', import.meta.url), 'utf8')
+calendarStyle.textContent = readFileSync(new URL('./components/ArchiveCalendar.css', import.meta.url), 'utf8') + readFileSync(new URL('./Research.css', import.meta.url), 'utf8')
 document.head.append(calendarStyle)
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 // Full page rendering must not touch any IndexedDB, including the working DB.
@@ -19,6 +19,7 @@ let loadSnapshot
 const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error',
   plugins: [{ name: 'research-test-repository', enforce: 'pre', transform(code, id) {
     if (id.endsWith('/src/storage/researchRepository.js')) return 'export const loadResearch = userId => globalThis.__researchRenderLoad(userId)'
+    if (id.endsWith('/src/storage/publicationRepository.js')) return 'export const listOwnPublications = async () => []'
   } }] })
 globalThis.__researchRenderLoad = userId => loadSnapshot(userId)
 const { default: Research } = await server.ssrLoadModule('/src/Research.jsx')
@@ -49,9 +50,15 @@ test('full Research page renders after asynchronous loading, with word caption, 
       assert.equal(flushCount, 1)
       assert.equal(container.querySelector('.research-day p').textContent, '3 слов')
       assert.equal(container.querySelector('.research-day h2').textContent, 'Темп письма')
+      const metadata = container.querySelector('.research-day-metadata')
+      assert.ok(metadata.contains(container.querySelector('.research-day h1')))
+      assert.ok(!metadata.contains(container.querySelector('.research-day h2')))
+      assert.equal(window.getComputedStyle(container.querySelector('.research-day-heading')).display, 'grid')
       const totals = [...container.querySelectorAll('.research-totals > div')]
       assert.equal(totals.length, 6)
       assert.deepEqual(totals.map(item => item.querySelector('strong').textContent), ['1', '3', '1', '1', '1', String(backupCount)])
+      assert.deepEqual([...container.querySelectorAll('.research-publication-totals strong')].map(node => node.textContent), ['0', '0'])
+      assert.equal(container.textContent.includes('в интернете'), false)
       assert.equal(container.querySelectorAll('.research-time-row').length, 3)
       const monthButton = container.querySelector('.research-time-row[aria-label="Месяцы"] button[aria-pressed=true]')
       await act(async () => monthButton.click())

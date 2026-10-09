@@ -1,3 +1,5 @@
+import { publicProfileDetails } from './publicProfile.js'
+
 export function normalizePublicNickname(value) {
   if (typeof value !== 'string') throw new Error('Публичный никнейм должен быть текстом.')
   return value.trim()
@@ -40,6 +42,6 @@ export function resolvePublicIdentity(userId, settings) {
       typeof settings.allowNameDisclosure !== 'boolean') throw new Error('Invalid public identity')
   const nickname = normalizePublicNickname(settings.publicNickname ?? '')
   const displayName = nickname || settings.publicAlias
-  return Object.freeze({ nickname, alias: settings.publicAlias, publicId: settings.publicId, displayName,
+  return Object.freeze({ ...publicProfileDetails(settings), nickname, alias: settings.publicAlias, publicId: settings.publicId, displayName,
     allowNameDisclosure: settings.allowNameDisclosure, displayLabel: displayName + (settings.allowNameDisclosure ? ' ›' : '') })
 }

@@ -74,3 +74,27 @@ test('paragraph boundaries do not add empty duplicate paragraphs to either excer
     assert.deepEqual([...tail.querySelectorAll('p')].map(node => node.textContent), ['row5', 'row6', 'row7'])
   } finally { dom.window.close() }
 })
+
+test('compact profile preview contains only the first two visual lines, preserves marks and never mutates the snapshot', () => {
+  const f = fixture()
+  try {
+    const before = f.container.innerHTML
+    f.setWidth(14)
+    const compact = publicationPreview(f.container, { compact: true })
+    assert.equal(compact.head.textContent, f.container.textContent.slice(0, 28))
+    assert.equal(compact.tail, null)
+    assert.equal(compact.truncated, true)
+    assert.ok(compact.head.querySelector('strong'))
+    assert.ok(compact.head.querySelector('em'))
+    f.setWidth(25)
+    assert.ok(publicationPreview(f.container, { compact: true }).head.querySelector('u'))
+    f.setWidth(30)
+    const short = publicationPreview(f.container, { compact: true })
+    assert.equal(short.head.textContent, f.container.textContent)
+    assert.equal(short.truncated, undefined, 'two lines fit without an artificial ellipsis')
+    assert.equal(short.tail, null)
+    assert.equal(f.container.innerHTML, before)
+    f.setWidth(6)
+    assert.ok(publicationPreview(f.container).tail, 'default owner/feed preview still uses 3+3')
+  } finally { f.dom.window.close() }
+})

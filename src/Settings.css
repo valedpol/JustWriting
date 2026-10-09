@@ -11,10 +11,10 @@
 .settings-note { color: #777; font-size: 0.82rem; font-weight: 400; }
 .settings-content p { margin: 0 0 18px; }
 .settings-row { display: grid; grid-template-columns: minmax(135px, 0.8fr) minmax(0, 1.2fr); gap: 24px; align-items: baseline; margin-bottom: 18px; font-size: 0.9rem; }
-.settings-content input, .settings-content select { box-sizing: border-box; min-width: 0; width: 100%; border: 0; border-bottom: 1px solid #d9d9d9; border-radius: 0; padding: 5px 0; background: transparent; color: #262626; font: inherit; }
+.settings-content input, .settings-content select, .settings-content textarea { box-sizing: border-box; min-width: 0; width: 100%; border: 0; border-bottom: 1px solid #d9d9d9; border-radius: 0; padding: 5px 0; background: transparent; color: #262626; font: inherit; }
 .settings-content input::placeholder { color: #9b9b9b; }
 .settings-content button { justify-self: start; border: 0; padding: 0; background: transparent; color: #4b4b4b; font: inherit; font-size: 0.82rem; cursor: pointer; }
-.settings-content :is(button, input, select):focus-visible { outline: 1px solid #777; outline-offset: 4px; }
+.settings-content :is(button, input, select, textarea):focus-visible { outline: 1px solid #777; outline-offset: 4px; }
 .settings-link-value { display: flex; gap: 18px; align-items: baseline; min-width: 0; }
 .settings-resource { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 18px; align-items: end; margin-bottom: 24px; font-size: 0.85rem; }
 .settings-resource label { display: grid; gap: 8px; }
@@ -46,3 +46,6 @@
 .backup-data summary { cursor: pointer; color: #777; }
 
 .settings-content input[type="checkbox"] { width: auto; justify-self: start; accent-color: #777; }
+
+.public-links-actions { display: flex; gap: 24px; }
+.settings-content textarea { resize: vertical; }

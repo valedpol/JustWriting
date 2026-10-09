@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loadResearch } from './storage/researchRepository.js'
+import { listOwnPublications } from './storage/publicationRepository.js'
 import { researchData } from './domain/research.js'
 import './Research.css'
 import { writingChart, periodScale } from './domain/writingChart.js'
@@ -24,8 +25,11 @@ export default function Research({ userId, flush }) {
       reading = true
       try {
         await flush()
-        const snapshot = await loadResearch(userId)
-        if (!stopped && snapshot.profile) { setData({ ...researchData(snapshot, Date.now()), backupCount: backupStore.read() ? 1 : 0, calendarKey: localDayKey(Date.now(), snapshot.profile.timeZone) }); setError('') }
+        const [snapshot, publicationCounts] = await Promise.all([
+          loadResearch(userId),
+          Promise.all(['profile', 'feed'].map(async channel => [channel, (await listOwnPublications(userId, channel)).length])).then(Object.fromEntries),
+        ])
+        if (!stopped && snapshot.profile) { setData({ ...researchData(snapshot, Date.now()), publicationCounts, backupCount: backupStore.read() ? 1 : 0, calendarKey: localDayKey(Date.now(), snapshot.profile.timeZone) }); setError('') }
       } catch (failure) { if (!stopped) setError(failure.message) }
       finally { reading = false }
     }
@@ -49,9 +53,13 @@ export default function Research({ userId, flush }) {
     <ResearchTotals data={data} backupCount={data.backupCount} />
     <ArchiveCalendar entries={data.entries} period={period} currentKey={data.currentKey} calendarKey={data.calendarKey} onSelect={setSelected} />
     <section className="research-day">
-      <h1>{heading} {key === data.currentKey ? <small>сегодня</small> : null}</h1>
-      <p>{scale === 'day' && !entry ? 'Текста нет' : `${periodWords.toLocaleString('ru-RU')} слов`}</p>
-      <h2>Темп письма</h2>
+      <div className="research-day-heading">
+        <div className="research-day-metadata">
+          <h1>{heading} {key === data.currentKey ? <small>сегодня</small> : null}</h1>
+          <p>{scale === 'day' && !entry ? 'Текста нет' : `${periodWords.toLocaleString('ru-RU')} слов`}</p>
+        </div>
+        <h2>Темп письма</h2>
+      </div>
       <WritingChart chart={chart} />
     </section>
   </div>

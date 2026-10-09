@@ -1,3 +1,4 @@
+import { publicProfileField } from '../domain/publicProfile.js'
 import { transaction } from './database.js'
 import { publicProfileSettingsKey } from '../publications/model.js'
 import { assertPublicNicknameAvailable, initializePublicIdentity, normalizePublicNickname, resolvePublicIdentity } from '../domain/publicIdentity.js'
@@ -8,6 +9,12 @@ export function createPublicIdentityRepository({ runTransaction = transaction, a
     read.onsuccess = () => done(read.result)
   })
   return {
+    async findPublicIdentity(userId) {
+      if (typeof userId !== 'string' || !userId) throw new Error('Invalid public profile owner')
+      const settings = await readIdentity(userId)
+      // Navigation only reads existing identity; it must not initialize settings.
+      return settings?.publicId === undefined ? null : resolvePublicIdentity(userId, settings)
+    },
     async loadPublicIdentity(userId) {
       if (typeof userId !== 'string' || !userId) throw new Error('Invalid public profile owner')
       let settings = await readIdentity(userId)
@@ -46,10 +53,11 @@ export function createPublicIdentityRepository({ runTransaction = transaction, a
     },
     async savePublicIdentitySetting(userId, field, value) {
       if (typeof userId !== 'string' || !userId) throw new Error('Invalid public profile owner')
-      if (!['publicNickname', 'allowNameDisclosure'].includes(field)) throw new Error('Invalid public identity setting')
+      if (!['publicNickname', 'allowNameDisclosure', 'profileVisible', 'about', 'links', 'pinnedPublicationId'].includes(field)) throw new Error('Invalid public identity setting')
       if (field === 'publicNickname') value = normalizePublicNickname(value)
+      else if (['profileVisible', 'about', 'links', 'pinnedPublicationId'].includes(field)) value = publicProfileField(field, value)
       else if (typeof value !== 'boolean') throw new Error('Разрешение раскрывать имя должно быть boolean.')
-      return runTransaction(['settings'], 'readwrite', (tx, done, fail) => {
+      return runTransaction(field === 'pinnedPublicationId' ? ['settings', 'publications'] : ['settings'], 'readwrite', (tx, done, fail) => {
         const store = tx.objectStore('settings'), profile = store.get('localProfile')
         const current = store.get(publicProfileSettingsKey(userId))
         current.onsuccess = () => {
@@ -61,6 +69,16 @@ export function createPublicIdentityRepository({ runTransaction = transaction, a
             const commit = () => {
               store.put(next)
               done({ profile: profile.result, publicProfile: next, deferred: false })
+            }
+            if (field === 'pinnedPublicationId' && value !== null) {
+              const publication = tx.objectStore('publications').get(value)
+              publication.onsuccess = () => {
+                if (publication.result?.userId !== userId || publication.result?.channel !== 'profile') {
+                  fail(new Error('Можно закрепить только свою действующую публикацию в Профиле.')); return
+                }
+                commit()
+              }
+              return
             }
             if (field !== 'publicNickname') { commit(); return }
             // Local directory only. Read + collision check + write share the same
@@ -84,6 +102,7 @@ export function createPublicIdentityRepository({ runTransaction = transaction, a
 
 const repository = createPublicIdentityRepository()
 export const loadPublicIdentity = (...args) => repository.loadPublicIdentity(...args)
+export const findPublicIdentity = (...args) => repository.findPublicIdentity(...args)
 export const savePublicNickname = (...args) => repository.savePublicNickname(...args)
 export const savePublicIdentitySetting = (...args) => repository.savePublicIdentitySetting(...args)
 

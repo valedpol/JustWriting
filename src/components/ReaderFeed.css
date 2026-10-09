@@ -7,8 +7,13 @@
 .reader-publication-author { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; color: #262626; font: 500 16px/1.45 system-ui, sans-serif; overflow-wrap: anywhere; }
 .reader-publication-author button, .reader-feed-heading button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .reader-publication-author button:focus-visible, .reader-feed-heading button:focus-visible { outline: 1px solid #777; outline-offset: 4px; }
-.reader-own-marker { font-size: 10px; align-self: center; }
-.reader-author-disclosed { flex-basis: 100%; color: #777; font-size: 13px; font-weight: 400; }
+.reader-author-line > * + * { margin-left: 8px; }
+.reader-own-marker { font-size: 10px; vertical-align: middle; }
+.reader-author-disclosed { color: #777; font-size: 13px; font-weight: 400; }
 @media (max-width: 600px) {
   .reader-feed { --reader-text-inset: 28px; }
 }
+
+.reader-feed-content { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.reader-feed-content[hidden] { display: none; }
+.reader-publication-author .reader-profile-link { flex-basis: 100%; color: #777; font-size: 13px; font-weight: 400; }

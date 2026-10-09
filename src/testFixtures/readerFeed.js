@@ -1,15 +1,17 @@
 import { initializePublicIdentity } from '../domain/publicIdentity.js'
 import { legacyToDocument, parseDocument } from '../editor/document.js'
 import { createPublicationRepository } from '../storage/publicationRepository.js'
+import { createPublicProfileRepository } from '../storage/publicProfileRepository.js'
 import { createPublicIdentityRepository } from '../storage/publicIdentityRepository.js'
 
 // Explicit isolated runner required. Nothing seeds or opens a database on import.
 export async function createReaderFeedFixture({ runTransaction } = {}) {
   if (typeof runTransaction !== 'function') throw new Error('An isolated fixture transaction runner is required')
   const users = ['private-fixture-a', 'private-fixture-b', 'private-fixture-c']
-  const profiles = users.map((userId, i) => ({ key: 'localProfile', userId, displayName: `Current fixture name ${i}` }))
+  const profiles = users.map((userId, i) => ({ key: 'localProfile', userId, displayName: `Current fixture name ${i}`, createdAt: Date.UTC(2026, 8, 1) }))
   const publicProfiles = users.map((userId, i) => ({ ...initializePublicIdentity(userId), key: `publicProfile:${userId}`,
-    publicNickname: i === 0 ? 'Mumipol' : i === 2 ? 'Third' : '', allowNameDisclosure: i !== 1, authorVisibility: 'visible' }))
+    publicNickname: i === 0 ? 'Mumipol' : i === 2 ? 'Third' : '', allowNameDisclosure: i !== 1, authorVisibility: 'visible', profileVisible: i !== 1,
+    about: i === 0 ? 'Пишу о новых мирах.' : '', links: i === 0 ? [{ label: 'Сайт', url: 'https://example.org/' }] : [] }))
   const texts = users.map((userId, i) => {
     const content = `alpha beta gamma ${i}`
     const document = legacyToDocument(content)
@@ -35,7 +37,7 @@ export async function createReaderFeedFixture({ runTransaction } = {}) {
   for (let i = 0; i < 3; i++) {
     await runTransaction(['settings'], 'readwrite', tx => tx.objectStore('settings').put({ ...profiles[i], displayName: `HISTORICAL NAME ${i}` }))
     timestamp = i === 2 ? 300 : 200
-    records.push(...await repo.createPublications(users[i], { source: source(i), channels: i === 0 ? ['profile', 'feed', 'internet'] : ['feed'] }))
+    records.push(...await repo.createPublications(users[i], { source: source(i), channels: i === 0 ? ['profile', 'feed', 'internet'] : i === 2 ? ['profile', 'feed'] : ['feed'] }))
     if (i === 0) {
       timestamp = 300
       records.push(...await repo.createPublications(users[i], { source: source(i, { from: 1, to: 6 }), channels: ['feed'] }))
@@ -48,6 +50,10 @@ export async function createReaderFeedFixture({ runTransaction } = {}) {
   await runTransaction(['settings'], 'readwrite', tx => tx.objectStore('settings').put(profiles[0]))
   const currentNames = new Map(profiles.map(profile => [profile.userId, profile.displayName]))
   const identityRepo = createPublicIdentityRepository({ runTransaction, authorProfileProvider: async userId => currentNames.get(userId) ?? null })
+  const stats = new Map(publicProfiles.map((profile, i) => [profile.publicId, { joinedAt: i === 2 ? null : Date.UTC(2026, 8, 1), writingDays: 12 + i, totalWords: 1234 + i }]))
+  const profileRepo = createPublicProfileRepository({ runTransaction, authorStatsProvider: async publicId => stats.get(publicId) ?? null,
+    authorProfileProvider: async userId => currentNames.get(userId) ?? null })
+  const profileApi = { load: publicId => profileRepo.loadPublicProfile(publicId) }
   const api = { list: userId => repo.listReaderFeedPublications(userId), name: publicId => identityRepo.loadDisclosedAuthorName(publicId), remove: (userId, publicationId) => repo.deletePublication(userId, publicationId) }
-  return { users, profiles, publicProfiles, texts, records, currentNames, identityRepo, repo, api }
+  return { stats, profileRepo, profileApi, users, profiles, publicProfiles, texts, records, currentNames, identityRepo, repo, api }
 }

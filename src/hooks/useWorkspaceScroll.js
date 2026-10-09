@@ -7,8 +7,9 @@ export function useWorkspaceScroll(workspaceRef, section) {
     const workspace = workspaceRef.current
     if (!workspace || !selector) return
     const onWheel = (event) => {
+      const profile = section === 'feed' || section === 'archive' ? workspace.querySelector('.public-profile-view') : null
       const publications = section === 'archive' ? workspace.querySelector('.owner-publications') : null
-      routeWorkspaceWheel(event, workspace, publications?.querySelector('.owner-publications-scroll') ?? workspace.querySelector(selector))
+      routeWorkspaceWheel(event, workspace, profile?.querySelector('.archive-scroll') ?? publications?.querySelector('.owner-publications-scroll') ?? workspace.querySelector(selector))
     }
     // Native listener permits preventDefault; React wheel listeners may be passive.
     workspace.addEventListener('wheel', onWheel, { passive: false })

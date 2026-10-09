@@ -66,8 +66,15 @@ export function feedPublicationProjection(record, publicAuthor) {
     snapshot: copySnapshot(record.snapshot), authorVisibility: record.authorVisibility,
     ...(/^\d{4}-\d{2}-\d{2}$/.test(record.source?.archive?.dayKey ?? '') ? { writtenOn: record.source.archive.dayKey } : {}),
     ...(record.authorVisibility === 'visible' ? { author: { publicId: publicAuthor.publicId, displayName: publicAuthor.displayName,
-      allowNameDisclosure: publicAuthor.allowNameDisclosure, displayLabel: publicAuthor.displayName + (publicAuthor.allowNameDisclosure ? ' ›' : '') } } : {}) })
+      allowNameDisclosure: publicAuthor.allowNameDisclosure, profileVisible: publicAuthor.profileVisible === true, displayLabel: publicAuthor.displayName + (publicAuthor.allowNameDisclosure ? ' ›' : '') } } : {}) })
 }
 export function sortPublications(records) {
   return records.sort((a, b) => b.publishedAt - a.publishedAt || (a.publicationId < b.publicationId ? -1 : a.publicationId > b.publicationId ? 1 : 0))
+}
+
+// Same card payload for owner-as-guest and every other profile reader.
+export function profilePublicationProjection(record) {
+  return freeze({ publicationId: record.publicationId, publishedAt: record.publishedAt,
+    snapshot: copySnapshot(record.snapshot),
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(record.source?.archive?.dayKey ?? '') ? { writtenOn: record.source.archive.dayKey } : {}) })
 }

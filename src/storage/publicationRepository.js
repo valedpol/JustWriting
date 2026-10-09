@@ -63,10 +63,16 @@ export function createPublicationRepository({ runTransaction = transaction, flus
     },
     deletePublication(userId, publicationId) {
       if (typeof userId !== 'string' || !userId || typeof publicationId !== 'string' || !publicationId) throw new Error('Invalid owner/publication')
-      return runTransaction(['publications'], 'readwrite', (tx, done, fail) => {
+      return runTransaction(['publications', 'settings'], 'readwrite', (tx, done, fail) => {
         const store = tx.objectStore('publications'), read = store.get(publicationId)
         read.onsuccess = () => {
           if (!read.result || read.result.userId !== userId) { fail(new Error('Publication unavailable to owner')); return }
+          if (read.result.channel === 'profile') {
+            const settings = tx.objectStore('settings'), profile = settings.get(publicProfileSettingsKey(userId))
+            profile.onsuccess = () => {
+              if (profile.result?.pinnedPublicationId === publicationId) settings.put({ ...profile.result, pinnedPublicationId: null })
+            }
+          }
           store.delete(publicationId)
           done({ publicationId, deleted: true })
         }

@@ -29,6 +29,18 @@ async function fixture(t) {
     reopen: async () => { db.close(); db = await connectDatabase({ factory, name }) } }
 }
 
+test('navigation finds an existing public identity read-only and never initializes absent settings', async t => {
+  const f = await fixture(t), before = await f.dump()
+  const identity = await f.repo.findPublicIdentity(f.users[0])
+  assert.equal(identity.publicId, f.records[0].publicId)
+  assert.equal(identity.displayName, f.records[0].publicAlias)
+  assert.equal(identity.profileVisible, false)
+  assert.equal(await f.repo.findPublicIdentity('missing-owner'), null)
+  assert.deepEqual(await f.dump(), before)
+  await f.reopen()
+  assert.deepEqual(await f.repo.findPublicIdentity(f.users[0]), identity)
+})
+
 test('three identities reject case/Unicode collisions atomically, preserve display and retain publicId through rename/clear/reopen', async t => {
   const f = await fixture(t), [a, b, c] = f.users
   await f.owner(a)

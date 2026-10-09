@@ -1,6 +1,6 @@
 // Measure the already-rendered immutable snapshot, never its archive source.
 // DOM fragments preserve the renderer's marks and paragraph/line-break structure.
-export function publicationPreview(container) {
+export function publicationPreview(container, { compact = false } = {}) {
   const doc = container.ownerDocument
   const walker = doc.createTreeWalker(container, 5) // SHOW_ELEMENT | SHOW_TEXT
   const items = []
@@ -20,7 +20,7 @@ export function publicationPreview(container) {
     if (previous && Math.abs(previous.top - rect.top) < 3) previous.bottom = Math.max(previous.bottom, rect.bottom)
     else lines.push({ top: rect.top, bottom: rect.bottom })
   }
-  if (lines.length <= 6) return { head: container.cloneNode(true), tail: null }
+  if (lines.length <= (compact ? 2 : 6)) return { head: container.cloneNode(true), tail: null }
 
   const point = (node, offset) => {
     // Avoid cloning an empty paragraph/mark at a line boundary.
@@ -45,6 +45,11 @@ export function publicationPreview(container) {
       return point(node, low)
     }
     return [container, container.childNodes.length]
+  }
+  if (compact) {
+    const head = doc.createRange()
+    head.selectNodeContents(container); head.setEnd(...boundary(lines[2].top))
+    return { head: head.cloneContents(), tail: null, truncated: true }
   }
   const head = doc.createRange(), tail = doc.createRange()
   head.selectNodeContents(container); head.setEnd(...boundary(lines[3].top))

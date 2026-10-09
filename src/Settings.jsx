@@ -3,13 +3,12 @@ import { createPortal } from 'react-dom'
 import './Settings.css'
 import TimeInput from './components/TimeInput.jsx'
 import TimezoneSelect from './components/TimezoneSelect.jsx'
+import PublicProfileSettings from './components/PublicProfileSettings.jsx'
 import BackupData from './components/BackupData.jsx'
 import { parseDayStart, formatDayStart } from './domain/writingDay.js'
 import { loadPublicIdentity } from './storage/publicIdentityRepository.js'
 
-const networks = ['Telegram', 'Instagram', 'Facebook', 'VK', 'YouTube']
-
-// Profile/writing fields persist; social/resource controls remain prototypes.
+// Profile and public-profile settings persist separately from writing data.
 export default function Settings({ profile, onSave, statusHost, assertCanCreateBackup, onBackupActiveChange }) {
   const [nameDraft, setName] = useState(null)
   const [dayStartDraft, setDayStart] = useState(null)
@@ -74,8 +73,16 @@ export default function Settings({ profile, onSave, statusHost, assertCanCreateB
     finally { setSaving(false) }
   }
 
-  const [socialLinks, setSocialLinks] = useState({})
-  const [resources, setResources] = useState([])
+  const savePublicField = async (field, value) => {
+    if (!profile || !publicIdentity || saving || backupActive) return false
+    setSaving(true); setMessage('Сохраняю…')
+    try {
+      const result = await onSave(field, value)
+      setPublicIdentity(previous => ({ ...previous, [field]: result.publicProfile[field] }))
+      setMessage('Сохранено'); return true
+    } catch (error) { setMessage(error.message); return false }
+    finally { setSaving(false) }
+  }
   const [wordGoalDraft, setWordGoal] = useState(null)
   const wordGoal = wordGoalDraft ?? String(profile?.dailyWordGoal ?? '')
   const [goalError, setGoalError] = useState('')
@@ -99,10 +106,6 @@ export default function Settings({ profile, onSave, statusHost, assertCanCreateB
     } finally { setSaving(false) }
   }
   const [timezoneDraft, setTimezoneDraft] = useState(null)
-
-  const updateResource = (id, field, value) => {
-    setResources((items) => items.map((item) => item.id === id ? { ...item, [field]: value } : item))
-  }
 
   return <div className="settings-content">
     <h1>Настройки</h1>
@@ -141,30 +144,8 @@ export default function Settings({ profile, onSave, statusHost, assertCanCreateB
       </div>
     </section>
 
-    <section aria-labelledby="settings-social">
-      <h2 id="settings-social">Социальные сети</h2>
-      <p className="settings-note">Ссылки не публикуются.</p>
-      {networks.map((network) => <div className="settings-row" key={network}>
-        <label htmlFor={`social-${network}`}>{network}</label>
-        {Object.hasOwn(socialLinks, network) ? <div className="settings-link-value">
-          <input id={`social-${network}`} type="url" placeholder="https://" value={socialLinks[network]} onChange={(event) => setSocialLinks((links) => ({ ...links, [network]: event.target.value }))} />
-          <button type="button" aria-label={`Удалить ссылку ${network}`} onClick={() => setSocialLinks((links) => {
-            const next = { ...links }; delete next[network]; return next
-          })}>Удалить</button>
-        </div> : <button type="button" aria-label={`Добавить ссылку ${network}`} onClick={() => setSocialLinks((links) => ({ ...links, [network]: '' }))}>Добавить ссылку</button>}
-      </div>)}
-    </section>
-
-    <section aria-labelledby="settings-resources">
-      <h2 id="settings-resources">Другие ресурсы</h2>
-      <p className="settings-note">Ссылки не публикуются.</p>
-      {resources.map((resource, index) => <div className="settings-resource" key={resource.id}>
-        <label>Название<input value={resource.name} placeholder="Личный сайт" onChange={(event) => updateResource(resource.id, 'name', event.target.value)} /></label>
-        <label>URL<input type="url" value={resource.url} placeholder="https://" onChange={(event) => updateResource(resource.id, 'url', event.target.value)} /></label>
-        <button type="button" aria-label={`Удалить ресурс ${index + 1}`} onClick={() => setResources((items) => items.filter((item) => item.id !== resource.id))}>Удалить</button>
-      </div>)}
-      <button type="button" onClick={() => setResources((items) => [...items, { id: crypto.randomUUID(), name: '', url: '' }])}>Добавить ресурс</button>
-    </section>
+    <PublicProfileSettings key={profile?.userId ?? 'loading'} identity={publicIdentity}
+      disabled={!profile || !publicIdentity || saving || backupActive} onSave={savePublicField} />
 
     <section aria-labelledby="settings-account">
       <h2 id="settings-account">Аккаунт</h2>

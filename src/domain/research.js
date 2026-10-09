@@ -7,9 +7,20 @@ export function shiftDate(key, delta) {
   return date.toISOString().slice(0, 10)
 }
 
+// Shared archive-derived writing totals; publications never enter this map.
+export function writingEntries(texts, days) {
+  const byId = new Map(days.map(day => [day.userDayId, day]))
+  const entries = new Map()
+  for (const text of texts) {
+    const day = byId.get(text.userDayId)
+    if (day && day.userId === text.userId) entries.set(day.dayKey, { day, text, words: getWordCount(text.content) })
+  }
+  return entries
+}
+
 export function researchData({ texts, days, samples, profile }, now) {
   const byId = new Map(days.map((day) => [day.userDayId, day]))
-  const entries = new Map()
+  const entries = writingEntries(texts, days)
   const tags = new Set(), titles = new Set()
   for (const text of texts) {
     const day = byId.get(text.userDayId)
@@ -19,7 +30,6 @@ export function researchData({ texts, days, samples, profile }, now) {
       if (item.kind === 'tag') tags.add(item.value)
       if (item.kind === 'title') titles.add(item.value)
     }
-    entries.set(day.dayKey, { day, text, words: getWordCount(text.content) })
   }
   const calendar = calculateUserDay({ ...profile, now })
   const open = days.filter((day) => day.state === 'open' && day.startsAt <= now && now < day.endsAt)

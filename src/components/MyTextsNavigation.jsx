@@ -2,7 +2,7 @@ const channels = [['profile', 'Профиль'], ['feed', 'Лента'], ['inter
 const tools = ['Поиск', 'Названия', 'Теги', 'Публикации']
 const noun = (n, forms) => forms[n % 100 >= 11 && n % 100 <= 14 ? 2 : n % 10 === 1 ? 0 : n % 10 >= 2 && n % 10 <= 4 ? 1 : 2]
 
-export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, draft, onDraft, onSubmit, results, activeIndex, onLocate, busy, publicationPage, publicationCounts, onPublicationsOpen, onPublicationChannel, onPublicationsBack }) {
+export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, draft, onDraft, onSubmit, results, activeIndex, onLocate, busy, publicationPage, publicationCounts, onPublicationsOpen, onPublicationChannel, onPublicationsBack, publicIdentity, onOpenProfile }) {
   return <nav className="side-menu research-local-menu my-texts-local-menu" aria-label="Мои тексты">
     <span className="menu-item">Мои тексты</span>
     <div className="research-local-children">
@@ -34,11 +34,13 @@ export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, dr
             <button type="button" aria-label="Следующее вхождение" disabled={busy || activeIndex >= results.occurrences.length - 1} onClick={() => onLocate(activeIndex + 1)}>›</button>
           </div> : null}
         </div> : null}
-      </> : tools.map(label => <button key={label} type="button"
+      </> : <>{tools.map(label => <button key={label} type="button"
         className={`menu-item${label === 'Публикации' ? ' my-texts-publications' : ''}`} disabled={!['Поиск', 'Публикации'].includes(label) || busy}
         onClick={label === 'Поиск' ? () => onSearchOpen(true) : label === 'Публикации' ? onPublicationsOpen : undefined}>
         {label}
       </button>)}
+        {publicIdentity?.profileVisible === true && onOpenProfile ? <button type="button" className="menu-item" disabled={busy} onClick={onOpenProfile}>Профиль</button> : null}
+      </>}
     </div>
     <button type="button" className="menu-item research-local-exit"
       disabled={busy}

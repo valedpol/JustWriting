@@ -12,7 +12,7 @@ const writingDate = dayKey => new Intl.DateTimeFormat('ru-RU', { day: 'numeric',
   .format(new Date(`${dayKey}T00:00:00Z`)).replace(/\s*г\.$/, '')
 
 export default function PublicationView({ records, error = '', heading, channel = 'feed', onBusyChange = () => {}, onRemove,
-  metadataHost, ariaLabel, emptyMessage = 'Здесь пока нет публикаций.', renderAuthor, canRemove = () => false }) {
+  metadataHost, ariaLabel, introduction, renderPublicationLabel, renderOwnerActions, actionBusy = false, compactPreview = false, stickyPublicationId = null, emptyMessage = 'Здесь пока нет публикаций.', renderAuthor, canRemove = () => false }) {
   const [removalError, setError] = useState('')
   const [confirmation, setConfirmation] = useState(null)
   const [confirmationAction, setConfirmationAction] = useState('cancel')
@@ -36,6 +36,7 @@ export default function PublicationView({ records, error = '', heading, channel 
       const top = header.current ? Math.max(viewport.top, header.current.getBoundingClientRect().bottom + 8) : viewport.top
       rail.current.style.top = `${top - host.top}px`
       rail.current.style.height = `${Math.max(0, viewport.bottom - top)}px`
+      const pinnedBounds = articles.current.get(stickyPublicationId)?.getBoundingClientRect()
       for (const record of records ?? []) {
         const article = articles.current.get(record.publicationId), note = notes.current.get(record.publicationId)
         if (!article || !note) continue
@@ -46,7 +47,10 @@ export default function PublicationView({ records, error = '', heading, channel 
         article.style.setProperty('--publication-metadata-height', `${height + inset}px`)
         const bounds = article.getBoundingClientRect()
         const contentTop = (article.querySelector('h2') ?? article.querySelector('.owner-publication-text')).getBoundingClientRect().top
-        note.style.top = `${archiveDateTop(contentTop - top, bounds.bottom - top, height)}px`
+        const belowPin = pinnedBounds && record.publicationId !== stickyPublicationId
+        const noteTop = belowPin ? Math.max(top, pinnedBounds.bottom + 8) : top
+        note.style.top = `${noteTop - top + archiveDateTop(contentTop - noteTop, bounds.bottom - noteTop, height)}px`
+        note.style.visibility = belowPin && bounds.bottom < noteTop + height ? 'hidden' : ''
       }
     }
     measure()
@@ -57,7 +61,7 @@ export default function PublicationView({ records, error = '', heading, channel 
     for (const note of notes.current.values()) observer.observe(note)
     for (const article of articles.current.values()) observer.observe(article)
     return () => { scroller.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); observer.disconnect() }
-  }, [records, metadataHost, confirmation, busy, expanded, hasHeading])
+  }, [records, metadataHost, confirmation, busy, expanded, hasHeading, introduction, stickyPublicationId])
   const remove = async publicationId => {
     setBusy(true); onBusyChange(true); setError('')
     try {
@@ -71,20 +75,22 @@ export default function PublicationView({ records, error = '', heading, channel 
     <div ref={scrollArea} className={`archive-scroll owner-publications-scroll${hasHeading ? ' has-heading' : ''}`}>
     {hasHeading ? <h1 ref={header}><span className="archive-calendar-heading">{heading}</span></h1> : null}
     <div className="owner-publications-content">
+    {introduction}
     {error || removalError ? <p role="alert">{error || removalError}</p> : null}
     {records === null && !error ? <p role="status">Загрузка…</p> : null}
     {records?.length === 0 ? <p>{emptyMessage}</p> : null}
-    {records?.map(record => <article className="owner-publication" key={record.publicationId}
+    {records?.map(record => <article className={`owner-publication${record.publicationId === stickyPublicationId ? ' is-profile-pinned' : ''}`} key={record.publicationId}
       onClick={() => { if (!expanded.has(record.publicationId)) toggle(record.publicationId) }}
       ref={node => { if (node) articles.current.set(record.publicationId, node); else articles.current.delete(record.publicationId) }}>
       <h2 className={record.snapshot.title === undefined ? 'is-placeholder' : undefined}>
         <button type="button" aria-expanded={expanded.has(record.publicationId)}
           aria-label={`${expanded.has(record.publicationId) ? 'Схлопнуть' : 'Раскрыть'} публикацию`}
           onClick={event => { event.stopPropagation(); toggle(record.publicationId) }}>{record.snapshot.title ?? 'Без названия'}</button>
+        {renderPublicationLabel?.(record)}
       </h2>
       {expanded.has(record.publicationId)
         ? <div className="owner-publication-text"><ReadonlyDocument record={record.snapshot} /></div>
-        : <PublicationPreview snapshot={record.snapshot} />}
+        : <PublicationPreview snapshot={record.snapshot} compact={compactPreview} />}
       {(record.writtenOn ?? record.source?.archive?.dayKey) ? <div className="owner-publication-written">Написано <time dateTime={record.writtenOn ?? record.source.archive.dayKey}>{writingDate(record.writtenOn ?? record.source.archive.dayKey)}</time></div> : null}
     </article>)}
     </div>
@@ -99,11 +105,12 @@ export default function PublicationView({ records, error = '', heading, channel 
         <span>Снять публикацию из {removalLabels[channel]}?</span>
         <div className="owner-publication-confirmation-actions">
           <button type="button" className={confirmationAction === 'remove' ? 'is-active' : undefined} onFocus={() => setConfirmationAction('remove')}
-            disabled={busy || blocked} onClick={() => remove(record.publicationId)}>{busy ? 'Снятие…' : 'Снять'}</button>
+            disabled={busy || actionBusy || blocked} onClick={() => remove(record.publicationId)}>{busy ? 'Снятие…' : 'Снять'}</button>
           <button type="button" autoFocus className={confirmationAction === 'cancel' ? 'is-active' : undefined} onFocus={() => setConfirmationAction('cancel')}
-            disabled={busy} onClick={() => setConfirmation(null)}>Отмена</button>
+            disabled={busy || actionBusy} onClick={() => setConfirmation(null)}>Отмена</button>
         </div>
-      </div> : <button type="button" disabled={busy || blocked} onClick={() => { setConfirmation(record.publicationId); setConfirmationAction('cancel'); setError('') }}>Снять с публикации</button> : null}
+      </div> : <button type="button" disabled={busy || actionBusy || blocked} onClick={() => { setConfirmation(record.publicationId); setConfirmationAction('cancel'); setError('') }}>Снять с публикации</button> : null}
+        {renderOwnerActions?.(record, { disabled: busy || actionBusy || blocked })}
       </div>)}
     </div>, metadataHost) : null}
   </>

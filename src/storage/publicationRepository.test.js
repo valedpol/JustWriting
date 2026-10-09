@@ -162,7 +162,7 @@ test('live public nicknames update every visible publication without rewriting s
     else if (item.authorVisibility === 'visible') assert.equal(item.author.displayName, 'Nickname 2')
     else assert.equal('author' in item, false)
     assert.equal('userId' in item, false)
-    if (item.author) assert.deepEqual(Object.keys(item.author), ['publicId', 'displayName', 'allowNameDisclosure', 'displayLabel'])
+    if (item.author) assert.deepEqual(Object.keys(item.author), ['publicId', 'displayName', 'allowNameDisclosure', 'profileVisible', 'displayLabel'])
   }
   assert.equal(JSON.stringify(feed).includes('Hidden nickname'), false)
   assert.equal(JSON.stringify(feed).includes('Name user-'), false)

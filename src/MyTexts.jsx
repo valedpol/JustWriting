@@ -26,7 +26,8 @@ function dateLabel(key) {
   return key.split('-').reverse().join('.')
 }
 
-export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit, onPublicationSummary }) {
+export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit, onPublicationSummary, active = true, publicIdentity, onOpenProfile }) {
+  const returnScroll = useRef(null)
   const [publicationPage, setPublicationPage] = useState(null)
   const [publicationEntryEmpty, setPublicationEntryEmpty] = useState(false)
   const [publicationBusy, setPublicationBusy] = useState(false)
@@ -83,6 +84,13 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   const editors = useRef(new Map())
   const [hasOpened, setHasOpened] = useState(false)
 
+  useLayoutEffect(() => {
+    if (active && returnScroll.current !== null && scrollArea.current) {
+      scrollArea.current.scrollTop = returnScroll.current
+      returnScroll.current = null
+    }
+  }, [active])
+
   useEffect(() => {
     if (!userId) return
     let cancelled = false
@@ -99,13 +107,13 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
 
   useLayoutEffect(() => {
     const area = scrollArea.current
-    if (!area) return
+    if (!active || !area) return
     const measure = () => area.style.setProperty('--archive-height', `${area.clientHeight}px`)
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(area)
     return () => observer.disconnect()
-  }, [])
+  }, [active])
 
   useLayoutEffect(() => {
     const area = scrollArea.current
@@ -168,7 +176,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
 
   useLayoutEffect(() => {
     const area = scrollArea.current
-    if (!area || !metadataHost || !records) return
+    if (!active || !area || !metadataHost || !records) return
     const alignMetadata = () => {
       const viewport = area.getBoundingClientRect()
       const host = metadataHost.getBoundingClientRect()
@@ -196,7 +204,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       window.removeEventListener('resize', alignMetadata)
       observer.disconnect()
     }
-  }, [records, expanded, metadataHost, period, calendarOpen, activeQuery])
+  }, [active, records, expanded, metadataHost, period, calendarOpen, activeQuery])
 
   const changeCriteria = async (nextPeriod, nextQuery) => {
     if (periodChange.current) return
@@ -314,7 +322,19 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     } catch { setPeriodError('Не удалось завершить сохранение или загрузить публикации. Повторите вход.') }
     finally { setChangingPeriod(false) }
   }
+  const openOwnProfile = async () => {
+    if (!onOpenProfile || publicIdentity?.profileVisible !== true) return
+    setChangingPeriod(true); setPeriodError('')
+    try {
+      await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+      await pendingWrites.current()
+      returnScroll.current = scrollArea.current?.scrollTop ?? null
+      onOpenProfile({ publicId: publicIdentity.publicId, displayName: publicIdentity.displayName })
+    } catch { setPeriodError('Не удалось завершить сохранение. Повторите вход в профиль.') }
+    finally { setChangingPeriod(false) }
+  }
   const navigation = <MyTextsNavigation onExit={onExit} searchOpen={searchOpen} onSearchOpen={setSearchOpen}
+    publicIdentity={publicIdentity} onOpenProfile={onOpenProfile ? openOwnProfile : undefined}
     draft={draftQuery} onDraft={setDraftQuery} onSubmit={() => changeCriteria(period, draftQuery.trim())}
     results={searchResults} activeIndex={activeIndex} onLocate={locateOccurrence} busy={changingPeriod || publicationBusy || !records} publicationPage={publicationPage} publicationCounts={publicationCounts}
     onPublicationsOpen={openPublications} onPublicationChannel={channel => {
@@ -323,7 +343,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       setPublicationPage(channel)
     }}
     onPublicationsBack={() => setPublicationPage(null)} />
-  return <>{navigationHost ? createPortal(navigation, navigationHost) : navigation}<div className="editor-shell my-texts" hidden={!!publicationPage}>
+  return <>{active ? navigationHost ? createPortal(navigation, navigationHost) : navigation : null}<div className="editor-shell my-texts" hidden={!active || !!publicationPage}>
     {records ? <div className="archive-calendar-controls">
       <div className="archive-calendar-heading">
       <button type="button" aria-expanded={calendarOpen} aria-controls="archive-calendar" onMouseDown={event => event.preventDefault()} onClick={() => setCalendarOpen(open => !open)}>Календарь</button>
@@ -359,14 +379,14 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
               <div className="saved-text" aria-label="Сохранённый текст, только для чтения">
                 <ArchiveWritingEntry ref={editor => { if (editor) editors.current.set(record.textId, editor); else editors.current.delete(record.textId) }}
                   searchOccurrences={searchResults?.occurrences.filter(item => item.textId === record.textId)} activeSearchId={effectiveActiveSearchId}
-                  record={record} active={!publicationPage} layoutRevision={calendarOpen} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
+                  record={record} active={active && !publicationPage} layoutRevision={calendarOpen} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
               </div>
             </> : null}
           </li>)}
         </ul> : <p>{activeQuery ? 'Совпадений нет.' : period ? 'В выбранном периоде текстов нет.' : 'Сохранённых текстов пока нет.'}</p>}
     </div>
   </div>
-    {!publicationPage && metadataHost && metadataLayout && records ? createPortal(
+    {active && !publicationPage && metadataHost && metadataLayout && records ? createPortal(
       <>
       {expanded.size > 0 ? <div className="archive-actions" style={{ top: metadataLayout.actionsTop }}>
         <button type="button" onClick={collapseAll}>Схлопнуть все тексты</button>

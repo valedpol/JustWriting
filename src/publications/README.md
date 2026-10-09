@@ -64,7 +64,7 @@ reject. Republish is a new record/ID/time; no ghost, undo or source mutation.
 Feed/Internet legacy private author metadata is read from `settings.localProfile`
 (matching userId required), but its internal name/ID are never reader fields. Profile has
 neither author nor authorVisibility: its identity comes from the profile page.
-The future public-profile settings record is keyed `publicProfile:${userId}`,
+The public-profile settings record is keyed `publicProfile:${userId}`,
 with `userId`, `authorVisibility: 'visible' | 'hidden'`, optional `publicNickname`,
 random `publicId`, random `publicAlias` (e.g. `Автор-7K3M`) and boolean
 `allowNameDisclosure` (default false). Initialization preserves all existing fields
@@ -158,3 +158,59 @@ server author-profile source can serve the same contract without Public Profile 
 it never seeds or opens a database on import. Fixtures cover three authors,
 visible/hidden authorship, nickname/alias, disclosure, multiple snapshots and
 same-time ordering. Production navigation never imports or installs fixtures.
+
+## Public Profile (stage F)
+
+Public Profile is read-only and keyed by stable publicId. Its entry in Reader Feed
+requires a non-anonymous author and independent `profileVisible === true`, for
+both own and foreign publications. A missing permission reads as false without
+writing a default. Name disclosure never grants profile access. Own Feed records
+show `● nickname/alias` without a reveal control; foreign reveal state is local to
+each publication and displays the permitted name inline.
+
+Existing `settings.publicProfile:${userId}` stores `profileVisible`, plain `about`
+(up to 300 Unicode characters), and `links: [{ label, url }]`. Links accept HTTPS
+without credentials. Settings replace the former unsaved social/resource mocks
+with this persisted public-profile editor. Schema remains v5, backup format v2;
+full settings records participate in the existing restore/reopen/compare.
+
+Author information renders in the left sidebar, outside the unchanged central
+reading frame. Owner Publications → Profile provides `Закрепить в профиле` /
+`Открепить`, selecting one `pinnedPublicationId` or null. The settings
+repository validates that the selected object still belongs to the current owner
+and the Profile channel in the same transaction as saving the pointer. No snapshot
+is changed. Public Profile displays that object first with a quiet pinned label,
+then the remaining snapshots in the existing chronological order. If the object
+is removed, the owner-safe delete transaction clears its matching pointer atomically.
+Readers also ignore stale pointers from older/imported records without writing settings.
+Owner libraries and Reader Feed ordering and 3+3 previews remain unchanged.
+Public Profile uses a compact first-two-visual-lines preview preserving B/I/U;
+expansion still renders the full immutable snapshot. The pinned card is first and
+uses native sticky positioning at the top of the bounded Public Profile scroller;
+its marginal date follows the card, while other dates stay below its visible area.
+Unpinning/removing the object removes sticky presentation as well as the pin.
+Its footer derives the count
+of this author's active Profile publications, with Russian text noun inflection.
+
+`loadPublicAuthorStats(publicId)` returns `{ joinedAt, writingDays, totalWords }`
+or null. Current-user aggregates are computed inside a readonly repository adapter
+using the same writing-entry helper as Research. Other authors use an injected
+readonly stats provider; the default has no foreign stats source and returns null.
+No private texts are delivered to Reader UI. `joinedAt` uses trustworthy localProfile
+createdAt only; missing/invalid dates remain null. No oldest-text/date-now fallback,
+import reconstruction or new saved counter exists. Publications never enter totals.
+
+`loadPublicProfile(publicId)` checks permission before reads and again after async
+providers, returning a safe live profile plus immutable Profile-channel cards.
+It uses `loadDisclosedAuthorName`, current profile settings and a reader projection
+of stored snapshots: no source re-render, owner controls, private markup or provenance.
+Stats/name unavailability does not hide other available profile data. The shared
+PublicProfileView is identical for owners-as-guests and foreign readers.
+
+Reader Feed profile links return directly to the mounted Reader Feed, preserving
+publicId author filter, card expansion and scroll. My Texts also offers a direct
+`Профиль` entry only when the existing identity has `profileVisible === true`.
+It opens the same publicId-based projection and renderer, with no owner controls;
+back returns to the mounted archive with its calendar period, expansion and scroll.
+Navigation reads existing identity without initializing settings.
+Fixtures explicitly provide multiple authors and stats, and run on isolated IDB only.

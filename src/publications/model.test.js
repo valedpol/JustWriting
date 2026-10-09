@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { prepareArchiveSnapshot } from './archiveSource.js'
-import { makePublication, feedPublicationProjection } from './model.js'
+import { makePublication, feedPublicationProjection, profilePublicationProjection } from './model.js'
 
 const text = { textId: 't', userId: 'u', userDayId: 'd', dayKey: '2026-10-07', revision: 1, content: 'abc' }
 const day = { userDayId: 'd', userId: 'u', dayKey: text.dayKey }
@@ -71,4 +71,8 @@ test('reader projection allowlists fields even if restored records contain extra
   assert.equal(reader.author.publicId, 'public-id')
   assert.equal('fullName' in reader.author, false)
   assert.throws(() => feedPublicationProjection(record), /Public author/)
+  const profileCard = profilePublicationProjection(record)
+  for (const field of ['author', 'authorVisibility', 'userId', 'source']) assert.equal(field in profileCard, false)
+  for (const field of ['semanticMarkup', 'tags']) assert.equal(field in profileCard.snapshot, false)
+  assert.equal(profileCard.snapshot.content, record.snapshot.content)
 })

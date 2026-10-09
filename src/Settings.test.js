@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import { act, createElement } from 'react'
 import { createServer } from 'vite'
+import { publicProfileField } from './domain/publicProfile.js'
 
 const dom = new JSDOM('<body></body>', { url: 'https://settings.test', pretendToBeVisual: true })
 for (const key of ['window', 'document', 'HTMLElement', 'HTMLInputElement']) globalThis[key] = dom.window[key]
@@ -16,17 +17,30 @@ const server = await createServer({ server: { middlewareMode: true, hmr: false, 
 const { default: Settings } = await server.ssrLoadModule('/src/Settings.jsx')
 after(async () => { delete globalThis.__nicknameIdentity; delete globalThis.__nicknameBackupToggle; await server.close(); dom.window.close() })
 
+test('pin management lives in owner Profile publications rather than public profile settings', async () => {
+  const f = await fixture()
+  try {
+    assert.equal(f.container.textContent.includes('Закреплённая публикация'), false)
+    assert.equal(f.container.textContent.includes('Закрепить в профиле'), false)
+  } finally { await f.close() }
+})
+
 async function fixture({ gate, failure } = {}) {
   const container = document.createElement('div'), status = document.createElement('aside')
   document.body.append(container, status)
   let root = createRoot(container)
   const profile = { userId: 'private-id', displayName: 'Внутреннее имя', dayStartMinutes: 0, timeZone: 'UTC' }
-  globalThis.__nicknameIdentity = { nickname: 'Старый ник', alias: 'Автор-7K3M', displayName: 'Старый ник', publicId: crypto.randomUUID(), allowNameDisclosure: false }
+  globalThis.__nicknameIdentity = { nickname: 'Старый ник', alias: 'Автор-7K3M', displayName: 'Старый ник', publicId: crypto.randomUUID(), allowNameDisclosure: false, profileVisible: false, about: '', links: [] }
   const calls = []
   const save = async (field, value) => {
     calls.push([field, value])
     await gate
     if (failure) throw new Error(failure)
+    if (['profileVisible', 'about', 'links', 'pinnedPublicationId'].includes(field)) {
+      const stored = publicProfileField(field, value)
+      globalThis.__nicknameIdentity[field] = stored
+      return { publicProfile: { [field]: stored }, deferred: false }
+    }
     if (field === 'allowNameDisclosure') {
       globalThis.__nicknameIdentity.allowNameDisclosure = value
       return { publicProfile: { allowNameDisclosure: value }, deferred: false }
@@ -142,6 +156,45 @@ test('nickname collision shows the quiet repository message and keeps the saved 
     assert.equal(f.input('Публичный никнейм').value, 'Mumipol')
     await f.reopen()
     assert.equal(f.input('Публичный никнейм').value, 'Старый ник')
+    assert.equal(f.input('Имя для себя').value, 'Внутреннее имя')
+  } finally { await f.close() }
+})
+
+
+test('public profile permission, about and HTTPS links persist independently; link removal and busy/backup gates work', async () => {
+  const f = await fixture()
+  const click = async text => act(async () => [...f.container.querySelectorAll('button')].find(node => node.textContent === text).click())
+  const type = async (node, value) => act(async () => {
+    const prototype = node.tagName === 'TEXTAREA' ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(node, value)
+    node.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  })
+  try {
+    assert.equal(f.input('Показывать публичный профиль').checked, false)
+    await act(async () => f.input('Показывать публичный профиль').click())
+    assert.equal(f.input('Показывать публичный профиль').checked, true)
+    assert.equal(f.input('Разрешить раскрывать имя').checked, false)
+    await type(f.container.querySelector('textarea'), 'О себе')
+    await act(async () => f.container.querySelector('textarea').dispatchEvent(new dom.window.FocusEvent('focusout', { bubbles: true })))
+    await click('Добавить ссылку')
+    const fields = f.container.querySelectorAll('.settings-resource input')
+    await type(fields[0], 'Сайт'); await type(fields[1], 'https://example.org')
+    await click('Сохранить ссылки')
+    await f.reopen()
+    assert.equal(f.input('Показывать публичный профиль').checked, true)
+    assert.equal(f.container.querySelector('textarea').value, 'О себе')
+    assert.equal(f.container.querySelector('.settings-resource input[type=url]').value, 'https://example.org/')
+    await click('Удалить'); await click('Сохранить ссылки'); await f.reopen()
+    assert.equal(f.container.querySelector('.settings-resource'), null)
+    await type(f.container.querySelector('textarea'), 'a'.repeat(301))
+    await act(async () => f.container.querySelector('textarea').dispatchEvent(new dom.window.FocusEvent('focusout', { bubbles: true })))
+    assert.equal(f.status.textContent, 'О себе — не более 300 символов.')
+    await f.reopen()
+    assert.equal(f.container.querySelector('textarea').value, 'О себе')
+    await act(async () => globalThis.__nicknameBackupToggle(true))
+    assert.equal(f.input('Показывать публичный профиль').disabled, true)
+    assert.equal(f.container.querySelector('textarea').disabled, true)
+    assert.equal([...f.container.querySelectorAll('button')].find(node => node.textContent === 'Добавить ссылку').disabled, true)
     assert.equal(f.input('Имя для себя').value, 'Внутреннее имя')
   } finally { await f.close() }
 })

@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import './App.css'
 import { useTodayText } from './hooks/useTodayText'
 import { getWordCount, wordCountNoun } from './domain/wordCount'
 import MyTexts from './MyTexts'
 import Settings from './Settings'
 import ReaderFeed from './components/ReaderFeed.jsx'
+import PublicProfileView from './components/PublicProfileView.jsx'
+import { findPublicIdentity } from './storage/publicIdentityRepository.js'
 import Research from './Research'
 import ResearchNavigation from './components/ResearchNavigation'
 import WordCounter from './components/WordCounter'
@@ -39,9 +41,30 @@ function App() {
   const [{ section, screenMode }, dispatchScreen] = useReducer(editorScreenReducer, initialScreen, () => restoreScreen())
   useEffect(() => { rememberSection(section) }, [section])
   const isToday = section === 'today'
+  const [publicProfile, setPublicProfile] = useState(null)
+  const viewingPublicProfile = (section === 'feed' || section === 'archive') && Boolean(publicProfile)
+  const [publicIdentitySnapshot, setPublicIdentity] = useState(null)
+  const ownPublicIdentity = publicIdentitySnapshot?.ownerId === userId ? publicIdentitySnapshot.identity : null
+  useEffect(() => {
+    if (section !== 'archive' || !userId) return
+    let live = true, generation = 0
+    const reload = async () => {
+      const request = ++generation
+      try {
+        const identity = await findPublicIdentity(userId)
+        if (live && request === generation) setPublicIdentity({ ownerId: userId, identity })
+      } catch { if (live && request === generation) setPublicIdentity(null) }
+    }
+    reload(); window.addEventListener('focus', reload)
+    return () => { live = false; window.removeEventListener('focus', reload) }
+  }, [section, userId])
+  const profileLoaded = useCallback(profile => {
+    if (profile) setPublicProfile(previous => previous?.publicId === profile.publicId ? { publicId: profile.publicId, displayName: profile.displayName } : previous)
+  }, [])
   const [archiveWords, setArchiveWords] = useState(null)
   const [publicationSummary, setPublicationSummary] = useState(null)
   const [archiveNavigationHost, setArchiveNavigationHost] = useState(null)
+  const [publicAuthorInfoHost, setPublicAuthorInfoHost] = useState(null)
   const [archiveMetadataHost, setArchiveMetadataHost] = useState(null)
   const [settingsStatusHost, setSettingsStatusHost] = useState(null)
   const [backupActive, setBackupActive] = useState(false)
@@ -69,6 +92,8 @@ function App() {
     editorRef.current?.cancelPanel()
     endWriting()
     if (nextSection === 'archive' && section !== 'archive') { setArchiveWords(null); setPublicationSummary(null) }
+    if (nextSection !== 'archive') setPublicIdentity(null)
+    if (nextSection !== 'feed' || nextSection !== section) setPublicProfile(null)
     dispatchScreen({ type: 'section', section: nextSection })
   }
   const setWritingScreenMode = nextMode => {
@@ -92,14 +117,14 @@ function App() {
   }
 
   return (
-    <div className={`app-shell screen-${screenMode}${section === 'feed' ? ' archive-page feed-page' : section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
+    <div className={`app-shell screen-${screenMode}${section === 'feed' || viewingPublicProfile ? ' archive-page feed-page' : section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
       <header className="topbar">
         <div className="brand-block">Just Writing</div>
 
         <div className={`meta-block${graceUntil ? ' is-grace' : ''}`}>
-          {section === 'feed' ? (
+          {section === 'feed' || viewingPublicProfile ? (
             <div className="public-page-header">
-              <span className="public-page-title">Общая страница</span>
+              <span className="public-page-title">{publicProfile ? `Профиль ${publicProfile.displayName}` : 'Общая страница'}</span>
               <span className="public-page-date">{formatLongDate(now)}</span>
             </div>
           ) : screenMode === SCREEN_MODES.interface ? (
@@ -198,14 +223,14 @@ function App() {
 
       <main className="main-layout" ref={workspaceRef}>
         <aside className="left-sidebar">
-          <div className="quote-box">
+          {viewingPublicProfile ? <div className="public-profile-author-slot" ref={setPublicAuthorInfoHost} /> : <div className="quote-box">
             <p>
               Писать проще, когда вокруг тишина и достаточно времени, чтобы
               услышать себя.
             </p>
-          </div>
+          </div>}
 
-          {section === 'research' ? <ResearchNavigation onExit={() => openSection('today')} /> : section === 'archive' ? <div ref={setArchiveNavigationHost} className="archive-navigation-slot" /> : <nav className="side-menu" aria-label="Главное меню">
+          {viewingPublicProfile ? <nav className="side-menu" aria-label="Публичный профиль"><button type="button" className="menu-item" aria-label={section === 'archive' ? 'Вернуться в Мои тексты' : 'Вернуться в Общую страницу'} onClick={() => setPublicProfile(null)}>←</button></nav> : section === 'research' ? <ResearchNavigation onExit={() => openSection('today')} /> : section === 'archive' ? <div ref={setArchiveNavigationHost} className="archive-navigation-slot" /> : <nav className="side-menu" aria-label="Главное меню">
             <button type="button" className={`menu-item${section === 'archive' ? ' is-active' : ''}`} aria-current={section === 'archive' ? 'page' : undefined} onClick={() => openSection('archive')}>
               Мои тексты
             </button>
@@ -233,8 +258,11 @@ function App() {
               writing={screenMode !== SCREEN_MODES.interface} metadataHost={archiveMetadataHost}
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
-          {section === 'feed' ? <ReaderFeed key={userId} userId={userId} metadataHost={archiveMetadataHost} statusHost={settingsStatusHost} /> : section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
-            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <MyTexts navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} onPublicationSummary={setPublicationSummary} /> : null}
+          {section === 'feed' ? <ReaderFeed key={userId} userId={userId} metadataHost={archiveMetadataHost} statusHost={settingsStatusHost} authorInfoHost={publicAuthorInfoHost} profile={publicProfile} onOpenProfile={setPublicProfile} onProfileLoaded={profileLoaded} /> : section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
+            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <>
+            <MyTexts active={!viewingPublicProfile} publicIdentity={ownPublicIdentity} onOpenProfile={setPublicProfile} navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} onPublicationSummary={setPublicationSummary} />
+            {viewingPublicProfile ? <div className="reader-feed"><PublicProfileView key={publicProfile.publicId} publicId={publicProfile.publicId} metadataHost={archiveMetadataHost} authorInfoHost={publicAuthorInfoHost} statusHost={settingsStatusHost} onLoaded={profileLoaded} /></div> : null}
+          </> : null}
         </section>
 
         <aside className="right-sidebar" ref={setArchiveMetadataHost} />
@@ -245,7 +273,7 @@ function App() {
           {isToday ? <>
             <WordCounter count={currentDayWords} goal={localProfile?.dailyWordGoal} />
           <span className="footer-status-text" role="status" title={error || 'Локальное хранение на этом устройстве'}>{status === 'loading' ? 'Загружаю' : status === 'saving' ? 'Сохраняю' : status === 'error' || status === 'load-error' ? 'Ошибка сохранения' : status === 'saved' ? 'Сохранено' : ''}</span>
-          </> : section === 'archive' ? publicationSummary ? publicationSummary.channel ?
+          </> : section === 'archive' && !viewingPublicProfile ? publicationSummary ? publicationSummary.channel ?
             <span className="footer-status-text" role="status">Опубликовано {publicationSummary.wordCount ?? '…'} {wordCountNoun(publicationSummary.wordCount ?? 0)}</span> : null : <>
             <span className="footer-status-text">Написано</span>
             <span>{archiveWords ?? '…'} слов</span>
