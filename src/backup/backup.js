@@ -2,7 +2,7 @@ import { maintenance } from '../runtime/maintenance.js'
 import { encode, decode } from './backupCodec.js'
 import { bytesHash } from '../utils/files.js'
 
-import { databaseSchema } from '../storage/databaseSchema.js'
+import { databaseSchema, DATABASE_VERSION, upgradePublicationStores } from '../storage/databaseSchema.js'
 const PREFIX = 'just-writing-backup-verification-'
 const REGISTRY = Symbol.for('just-writing.backup-isolated-databases.v1')
 if (!Object.hasOwn(globalThis, REGISTRY)) Object.defineProperty(globalThis, REGISTRY, { value: new Set() })
@@ -65,7 +65,7 @@ export async function captureBackup({ flush, factory = indexedDB, origin = locat
 
 export async function validateBackup(file) {
   const e = JSON.parse(await file.text())
-  if (e.format !== 'just-writing-backup' || ![1, 2].includes(e.formatVersion) || e.sha256 !== await hash({ payload: e.payload, storeHashes: e.storeHashes })) throw new Error('Invalid backup integrity/format')
+  if (e.format !== 'just-writing-backup' || ![1, 2, 3].includes(e.formatVersion) || e.sha256 !== await hash({ payload: e.payload, storeHashes: e.storeHashes })) throw new Error('Invalid backup integrity/format')
   const data = decode(e.payload)
   if (!same(await encode(data), e.payload)) throw new Error('Invalid or lossy backup encoding')
   const schema = databaseSchema(data.databaseVersion)
@@ -108,10 +108,35 @@ export async function verifyRestoredDatabase(file, name, { factory = indexedDB, 
   let restored
   try { restored = await readBackupDatabaseSnapshot(db) } finally { db.close() }
   if (!same(await encode(restored), await encode({ databaseVersion: data.databaseVersion, stores: data.stores }))) throw new Error('Restored schema/keys/counts/values differ')
+  // Compare in the original schema first, then prove that this version can
+  // consume the old backup. Only the registered UUID database is upgraded.
+  let migrated = restored
+  if (data.databaseVersion < DATABASE_VERSION) {
+    const upgraded = await open(factory, name, DATABASE_VERSION, (db, tx) => upgradePublicationStores(db, tx, data.databaseVersion))
+    upgraded.close()
+    const reopened = await open(factory, name, DATABASE_VERSION)
+    try { migrated = await readBackupDatabaseSnapshot(reopened) } finally { reopened.close() }
+  }
+  for (const oldStore of data.stores) {
+    const current = migrated.stores.find(s => s.name === oldStore.name)
+    if (!current || !same(await encode(current.records), await encode(oldStore.records)) || current.count !== oldStore.count) {
+      throw new Error('Migration changed restored keys/counts/values')
+    }
+  }
+  const expectedSchema = databaseSchema(DATABASE_VERSION).stores
+  const indexShape = ({ name, keyPath, unique, multiEntry }) => ({ name, keyPath, unique, multiEntry })
+  for (const store of migrated.stores) {
+    const original = data.stores.find(s => s.name === store.name)
+    const expected = original && store.name !== 'publications' ? original : expectedSchema[store.name]
+    if (store.keyPath !== expected.keyPath || store.autoIncrement !== expected.autoIncrement ||
+      !same(store.indexes.map(indexShape), [...expected.indexes].sort((a, b) => a.name.localeCompare(b.name)).map(indexShape))) throw new Error(`Migration schema differs: ${store.name}`)
+    if (!data.stores.some(s => s.name === store.name) && store.count !== 0) throw new Error('Migration populated a new store')
+  }
   if (deleteAfterSuccess) await new Promise((resolve, reject) => {
     const r = factory.deleteDatabase(name); r.onsuccess = resolve; r.onerror = () => reject(r.error); r.onblocked = () => reject(new Error('Cleanup blocked'))
   })
   isolated.delete(name)
   return { verified: true, databaseName: name, databaseVersion: data.databaseVersion,
+    migratedDatabaseVersion: migrated.databaseVersion, migrationVerified: true,
     counts: Object.fromEntries(data.stores.map(s => [s.name, s.count])), deleted: deleteAfterSuccess }
 }

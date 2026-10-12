@@ -16,10 +16,13 @@ export function publicProfileField(field, value) {
     if (!Array.isArray(value)) throw new Error('Публичные ссылки должны быть списком.')
     return value.map(link => {
       if (typeof link?.label !== 'string' || !link.label.trim() || typeof link.url !== 'string') throw new Error('Укажи название и URL ссылки.')
+      const input = link.url.trim()
+      const telegram = /^(?:@|t\.me\/)([a-z0-9_]+)$/i.exec(input)
+      const normalized = telegram ? `https://t.me/${telegram[1]}` : input
       let url
-      try { url = new URL(link.url.trim()) } catch { throw new Error('Укажи безопасный URL https://.') }
-      if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) throw new Error('Укажи безопасный URL https://.')
-      return Object.freeze({ label: link.label.trim(), url: url.href })
+      try { url = new URL(normalized) } catch { throw new Error('Укажи безопасный URL https://.') }
+      if (!/^https:\/\//i.test(normalized) || url.protocol !== 'https:' || !url.hostname || url.username || url.password) throw new Error('Укажи безопасный URL https://.')
+      return Object.freeze({ label: link.label.trim(), url: normalized })
     })
   }
   throw new Error('Invalid public profile setting')

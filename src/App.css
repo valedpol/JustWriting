@@ -342,10 +342,6 @@
   z-index: 1;
 }
 
-.app-shell.screen-writing-wide .search-button {
-  visibility: hidden;
-}
-
 .app-shell:is(.screen-writing-standard, .screen-writing-wide) .brand-block {
   align-self: start;
   margin-top: calc((72px - 1.5em) / 2);

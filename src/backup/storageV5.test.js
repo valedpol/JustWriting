@@ -46,7 +46,7 @@ const snapshot = async (factory, name, version) => {
   const db = await open(factory, name, version)
   try { return await readBackupDatabaseSnapshot(db) } finally { db.close() }
 }
-const legacyStores = data => data.stores.filter(s => s.name !== 'publications')
+const legacyStores = data => data.stores.filter(s => !['publications', 'publicationAnchors'].includes(s.name))
 
 async function reseal(file, change) {
   const envelope = JSON.parse(await file.text()), data = await validateBackup(file)
@@ -58,17 +58,18 @@ async function reseal(file, change) {
   return new File([JSON.stringify(envelope)], 'changed.json')
 }
 
-test('v4 to v5 only adds empty publications and its indexes; old schema, keys and lossless values survive reopen', async () => {
+test('v4 to v6 adds empty publications/anchors; old schema, keys and lossless values survive reopen', async () => {
   const f = await fixture()
   const db = await connectDatabase({ name: f.name, factory: f.factory })
-  assert.equal(db.version, 5)
+  assert.equal(db.version, 6)
   const after = await readBackupDatabaseSnapshot(db); db.close()
   assert.deepEqual(legacyStores(after), f.before.stores)
   const added = after.stores.find(s => s.name === 'publications')
   assert.equal(added.count, 0)
   assert.deepEqual(added.records, [])
-  assert.deepEqual(added.indexes, [...databaseSchema(5).stores.publications.indexes].sort((a, b) => a.name.localeCompare(b.name)))
-  assert.deepEqual(await snapshot(f.factory, f.name, 5), after)
+  assert.deepEqual(added.indexes, [...databaseSchema(6).stores.publications.indexes].sort((a, b) => a.name.localeCompare(b.name)))
+  assert.equal(after.stores.find(s => s.name === 'publicationAnchors').count, 0)
+  assert.deepEqual(await snapshot(f.factory, f.name, 6), after)
 })
 
 test('old v1 backup first restores exactly as v4; a separate migration of that UUID copy preserves all old stores', async () => {
@@ -79,21 +80,21 @@ test('old v1 backup first restores exactly as v4; a separate migration of that U
   const name = await restoreToNewDatabase(file, { factory: f.adapter })
   const exact = await verifyRestoredDatabase(file, name, { factory: f.adapter, deleteAfterSuccess: false })
   assert.equal(exact.databaseVersion, 4); assert.equal(exact.verified, true)
-  assert.deepEqual(await snapshot(f.factory, name, 4), { databaseVersion: 4, stores: data.stores })
+  assert.equal(exact.migratedDatabaseVersion, 6)
   f.opens.length = 0
   const migrated = await connectDatabase({ name, factory: f.adapter })
   const after = await readBackupDatabaseSnapshot(migrated); migrated.close()
-  assert.equal(after.databaseVersion, 5)
+  assert.equal(after.databaseVersion, 6)
   assert.deepEqual(legacyStores(after), data.stores)
   assert.equal(after.stores.find(s => s.name === 'publications').count, 0)
   assert.ok(f.opens.every(opened => opened === name), 'migration only opens the UUID restore copy')
-  assert.deepEqual(await snapshot(f.factory, name, 5), after)
+  assert.deepEqual(await snapshot(f.factory, name, 6), after)
   assert.deepEqual(await snapshot(f.factory, f.name, 4), f.before)
 })
 
 test('v2 captures five stores and all users losslessly; file verification never opens source and rejects changed publication values after reopen', async () => {
   const f = await fixture()
-  const db = await connectDatabase({ name: f.name, factory: f.factory })
+  const db = await open(f.factory, f.name, 5, db => createSchemaStore(db, 'publications', databaseSchema(5).stores.publications))
   const doc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Снимок', marks: [{ type: 'bold' }, { type: 'italic' }, { type: 'underline' }] }] }] }
   await write(db, ['publications'], tx => {
     for (const [i, userId] of ['u', 'other', 'third'].entries()) tx.objectStore('publications').add({
@@ -133,7 +134,7 @@ test('format/schema combinations, missing publications, extra stores and wrong i
   for (const change of [
     (data, envelope) => { envelope.formatVersion = 1 },
     data => { data.stores.pop() },
-    data => { data.databaseVersion = 6 },
+    data => { data.databaseVersion = 7 },
     data => { data.stores.push({ name: 'unknown', records: [], count: 0 }) },
     data => { data.stores.at(-1).indexes[0].unique = true },
   ]) {

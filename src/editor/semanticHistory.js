@@ -3,6 +3,7 @@ import { Mapping, Step, StepResult } from '@tiptap/pm/transform'
 import { closeHistory } from '@tiptap/pm/history'
 import { parseSemanticMarkup } from './semanticSnapshot.js'
 import { mapSemanticMarkup, selectionMarkup, slashMarkup } from './semanticMarkup.js'
+import { PublicationTextStep } from './publicationHistory.js'
 
 export const semanticMarkupKey = new PluginKey('jwSemanticMarkup')
 
@@ -104,7 +105,7 @@ export function getSemanticMarkup(state) {
 // Dispatch boundary for the later editor integration. Replays normal steps
 // without altering the incoming transaction, its selection or its metadata.
 // Undo/Redo already contain SemanticStep and can be dispatched directly.
-export function trackSemanticTransaction(state, source, { scrollIntoView = true } = {}) {
+export function trackSemanticTransaction(state, source, { scrollIntoView = true, trackPublications = false } = {}) {
   if (!source.before.eq(state.doc)) throw new Error('Устаревшая редакторская транзакция')
   let markup = getSemanticMarkup(state)
   const target = state.tr
@@ -112,7 +113,13 @@ export function trackSemanticTransaction(state, source, { scrollIntoView = true 
     if (step instanceof SemanticStep && JSON.stringify(step.before) !== JSON.stringify(markup)) {
       throw new Error('Устаревшая смысловая разметка транзакции')
     }
-    const tracked = step instanceof SemanticStep ? step : new SemanticStep(markup, mapSemanticMarkup(markup, step.getMap(), target.doc), step)
+    let textStep = step instanceof SemanticStep ? step.textStep : step
+    if (trackPublications && textStep && !(textStep instanceof PublicationTextStep) && textStep.getMap().ranges.length) {
+      textStep = new PublicationTextStep(textStep)
+    }
+    const tracked = step instanceof SemanticStep
+      ? (textStep === step.textStep ? step : new SemanticStep(step.before, step.after, textStep))
+      : new SemanticStep(markup, mapSemanticMarkup(markup, textStep.getMap(), target.doc), textStep)
     target.step(tracked)
     markup = tracked.after
   }

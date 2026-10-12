@@ -1,7 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { focusView } from '../editor/focusView.js'
-import { publicationLabels } from '../publications/labels.js'
+import PublicationMarker from './PublicationMarker.jsx'
+import { attachedLiveRange } from '../publications/liveAnchors.js'
+import { canonicalArchiveRange } from '../publications/archiveSource.js'
+import { archiveDocument } from '../editor/archiveDocument.js'
+import { parseDocument } from '../editor/document.js'
 import SearchHighlights from './SearchHighlights.jsx'
 import { TextSelection } from '@tiptap/pm/state'
 import { getSemanticMarkup, removeSemanticMarkup, setSemanticRange } from '../editor/semanticHistory.js'
@@ -9,26 +13,48 @@ import { getSemanticMarkup, removeSemanticMarkup, setSemanticRange } from '../ed
 const noPublications = []
 const labels = { tag: 'Тег', title: 'Название' }
 
-export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges, searchOccurrences = [], activeSearchId, publications = noPublications }) {
+export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges, searchOccurrences = [], activeSearchId, publications = noPublications, highlightedPublicationId, onHighlightPublication, onRemovePublication, obstruction = null }) {
   const railRef = useRef(null)
   const [rail, setRail] = useState([])
   const state = controller?.state
+  const record = controller?.snapshot.record
   useLayoutEffect(() => {
     if (!view || !active || !metadataHost) return
     const measure = () => {
       const bounds = metadataHost.getBoundingClientRect()
       const groups = new Map()
-      for (const item of getSemanticMarkup(view.state).sort((a, b) => a.anchor - b.anchor)) {
+      const markup = getSemanticMarkup(view.state).sort((a, b) => a.anchor - b.anchor)
+      const titles = new Map()
+      for (const item of markup) {
+        if (item.kind === 'title' && item.range) {
+          // Structural-only legacy ranges have no canonical text range.
+          // Keep their independent semantic label, without associating a marker.
+          let range
+          try { range = canonicalArchiveRange(view.state.doc, item.range) } catch { range = null }
+          if (range) {
+            const key = `${range.from}:${range.to}`
+            if (!titles.has(key)) titles.set(key, new Set())
+            titles.get(key).add(item.value)
+          }
+        }
         const key = item.kind === 'tag' && item.source === 'selection' && item.range
           ? `range:${item.range.from}:${item.range.to}` : `item:${item.id}`
         if (groups.has(key)) groups.get(key).items.push(item)
         else groups.set(key, { key, items: [item] })
       }
       for (const publication of publications) {
-        const range = publication.source.range
-        if (range.from > view.state.doc.content.size) continue
+        if (publication.source.sourceId !== record?.textId) continue
+        // During an optimistic edit/IME the persisted anchor belongs to the
+        // saved document, not the preedit preview. Never display stale positions.
+        if (!view.state.doc.eq(parseDocument(archiveDocument(record)))) continue
+        const range = attachedLiveRange(publication, record?.revision)
+        if (!range || range.from < 1 || range.from >= range.to || range.to >= view.state.doc.content.size) continue
         const key = `publication-range:${range.from}:${range.to}`
-        const item = { id: publication.publicationId, kind: 'publication', anchor: range.from, channel: publication.channel }
+        const exactTitles = titles.get(`${range.from}:${range.to}`)
+        // Current exact-range association only. The immutable snapshot title
+        // may describe a different historical range and is never a fallback.
+        const title = exactTitles?.size === 1 ? [...exactTitles][0] : undefined
+        const item = { id: publication.publicationId, kind: 'publication', anchor: range.from, channel: publication.channel, title }
         if (groups.has(key)) groups.get(key).items.push(item)
         else groups.set(key, { key, items: [item] })
       }
@@ -46,25 +72,41 @@ export default function SemanticRail({ view, controller, active, writing, ready,
     observer.observe(view.dom)
     observer.observe(metadataHost)
     return () => { scrollElement?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); observer.disconnect() }
-  }, [view, active, writing, metadataHost, scrollElement, tick, state, publications])
+  }, [view, active, writing, metadataHost, scrollElement, tick, state, publications, record])
   useLayoutEffect(() => {
     // Measure after wrapping, so a tall group cannot overlap the next one.
-    let previousBottom = -Infinity
     const groups = [...(railRef.current?.querySelectorAll('.semantic-group') ?? [])]
       .map((element, index) => ({ element, baseTop: rail[index].baseTop }))
       .sort((a, b) => a.baseTop - b.baseTop)
-    groups.forEach(({ element, baseTop }) => {
-      const height = element.getBoundingClientRect().height
-      const top = Math.max(baseTop, previousBottom)
-      element.style.top = `${top}px`
-      previousBottom = top + height
-    })
-  }, [rail, metadataHost])
+    const placeGroups = () => {
+      // The quick-search controls occupy only the right information area.
+      // Extend existing collision avoidance so labels cannot hide behind them.
+      let previousBottom = obstruction ? obstruction.getBoundingClientRect().bottom - metadataHost.getBoundingClientRect().top + 8 : -Infinity
+      groups.forEach(({ element, baseTop }) => {
+        const height = element.getBoundingClientRect().height
+        if (obstruction && baseTop + height <= 0) {
+          // Scrolled-out labels must still disappear, not accumulate below search.
+          element.style.top = `${baseTop}px`
+          return
+        }
+        const top = Math.max(baseTop, previousBottom)
+        element.style.top = `${top}px`
+        previousBottom = top + height
+      })
+    }
+    placeGroups()
+    const observer = new ResizeObserver(placeGroups)
+    groups.forEach(({ element }) => observer.observe(element))
+    if (obstruction) observer.observe(obstruction)
+    return () => observer.disconnect()
+  }, [rail, metadataHost, obstruction])
 
   return <>
     {metadataHost && controller && active ? createPortal(<div ref={railRef} className="semantic-rail" aria-label="Системная разметка">
       {rail.map(group => <div className="semantic-group" key={group.key} style={{ top: group.baseTop }}>
-        {group.items.map(item => item.kind === 'publication' ? <div className="publication-marker" key={item.id}>↗ {publicationLabels[item.channel]}</div> : <div className="semantic-label" key={item.id}>
+        {group.items.map(item => item.kind === 'publication' ? <PublicationMarker key={item.id} item={item} ready={ready}
+          highlighted={highlightedPublicationId === item.id} onHighlight={onHighlightPublication} onRemove={onRemovePublication}
+          canRemove={allowRemoval && !!onRemovePublication} report={report} /> : <div className="semantic-label" key={item.id}>
         <button className="semantic-value" data-kind={item.kind} disabled={!ready} title={item.range ? 'Выделить размеченный фрагмент' : 'Вторая граница ещё не задана'}
           onMouseDown={event => event.preventDefault()} onClick={event => {
             event.stopPropagation()

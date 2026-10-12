@@ -344,6 +344,24 @@ test('Public Profile renders public live stats/details and immutable Profile car
   assert.deepEqual((await f.dump()).publications, publications)
 })
 
+test('Public Profile displays a readable Telegram label with a normalized safe destination after reopen', async t => {
+  const f = await fixture(t)
+  await f.identityRepo.savePublicIdentitySetting(f.users[0], 'links', [{ label: '@User_name', url: '@User_name' }])
+  await f.reopen()
+  const before = await f.dump()
+  const { default: PublicProfileView } = await server.ssrLoadModule('/src/components/PublicProfileView.jsx')
+  await act(async () => f.root.render(createElement(PublicProfileView, {
+    publicId: f.publicProfiles[0].publicId, authorInfoHost: f.authorInfo, api: f.profileApi,
+  })))
+  await settle(() => f.authorInfo.querySelector('.public-profile-links a'))
+  const link = f.authorInfo.querySelector('.public-profile-links a')
+  assert.equal(link.textContent, '@User_name ↗')
+  assert.equal(link.href, 'https://t.me/User_name')
+  assert.equal(link.rel, 'noopener noreferrer')
+  assert.equal(link.target, '_blank')
+  assert.deepEqual(await f.dump(), before, 'public rendering does not write settings or publications')
+})
+
 test('Public Profile omits missing date/about/links/stats, renders fallback empty profile and respects profile/name revocation', async t => {
   const f = await fixture(t)
   const { default: PublicProfileView } = await server.ssrLoadModule('/src/components/PublicProfileView.jsx')

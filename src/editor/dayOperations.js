@@ -3,6 +3,7 @@ import { closeHistory, history, isHistoryTransaction } from '@tiptap/pm/history'
 import { ReplaceStep } from '@tiptap/pm/transform'
 import { CONTENT_FORMAT, CONTENT_VERSION, documentFromRecord, parseDocument } from './document.js'
 import { SemanticStep, getSemanticMarkup, semanticHistoryPlugin, trackSemanticTransaction } from './semanticHistory.js'
+import { PublicationTextStep } from './publicationHistory.js'
 
 const kinds = new Set(['input', 'paste', 'composition', 'delete', 'format', 'undo', 'redo', 'selection-markup', 'slash-markup', 'semantic', 'selection'])
 
@@ -26,7 +27,8 @@ export function editorSnapshot(state) {
 export function insertedSlices(transaction) {
   let spans = []
   for (const wrapped of transaction.steps) {
-    const step = wrapped instanceof SemanticStep ? wrapped.textStep : wrapped
+    let step = wrapped instanceof SemanticStep ? wrapped.textStep : wrapped
+    if (step instanceof PublicationTextStep) step = step.textStep
     if (!step) continue
     const map = step.getMap()
     spans = spans.flatMap(({ from, to }) => {
@@ -56,7 +58,7 @@ function detachedDraft(value) {
 
 export function captureDayOperation({ id = crypto.randomUUID(), source, transaction, kind, acceptedAt = Date.now(), sessionId = null, semanticDraft = null }) {
   if (!kinds.has(kind) || !Number.isFinite(acceptedAt) || typeof id !== 'string' || !id) throw new Error('Некорректная редакторская операция')
-  const tracked = trackSemanticTransaction(source.state, transaction)
+  const tracked = trackSemanticTransaction(source.state, transaction, { trackPublications: true })
   const applied = source.state.applyTransaction(tracked)
   if (!applied.transactions.length) throw new Error('Редактор отклонил операцию')
   const transferable = ['input', 'paste', 'composition'].includes(kind) && !isHistoryTransaction(tracked)
@@ -67,20 +69,22 @@ export function captureDayOperation({ id = crypto.randomUUID(), source, transact
   return Object.freeze({
     id, kind, acceptedAt, sessionId, userId: source.context.userId, dayKey: source.context.dayKey,
     beforeState: source.state, afterState: applied.state, changed: tracked.steps.length > 0,
+    steps: Object.freeze(applied.transactions.flatMap(tr => tr.steps)),
     slices: Object.freeze(transferable ? insertedSlices(tracked) : []),
     drafts: Object.freeze(draft ? [draft] : slashDrafts),
   })
 }
 
 export function transferDayOperation(state, operation) {
-  if (!operation.slices.length) return { state, changed: false }
+  if (!operation.slices.length) return { state, changed: false, steps: [] }
   const tr = closeHistory(state.tr)
   for (const slice of operation.slices) {
     const end = Selection.atEnd(tr.doc).to
     tr.replaceRange(end, end, slice)
   }
   tr.setSelection(Selection.atEnd(tr.doc))
-  const next = state.applyTransaction(trackSemanticTransaction(state, tr)).state
+  const applied = state.applyTransaction(trackSemanticTransaction(state, tr, { trackPublications: true }))
+  const next = applied.state
   // A transferred operation cannot share Undo with the next day's next input.
-  return { state: next.apply(closeHistory(next.tr)), changed: tr.steps.length > 0 }
+  return { state: next.apply(closeHistory(next.tr)), changed: tr.steps.length > 0, steps: applied.transactions.flatMap(tr => tr.steps) }
 }

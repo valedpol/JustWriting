@@ -1,7 +1,7 @@
 import { maintenance } from '../runtime/maintenance.js'
 import { userDayFromText } from '../domain/userDay.js'
 
-import { DATABASE_VERSION, databaseSchema, createSchemaStore } from './databaseSchema.js'
+import { DATABASE_VERSION, upgradePublicationStores } from './databaseSchema.js'
 
 export { DATABASE_VERSION }
 let connection
@@ -20,9 +20,7 @@ function connectUnfenced({ name = 'just-writing', now = Date.now(), factory = in
       try { maintenance.assertSchemaWrite() } catch (error) { migrationError = error; request.transaction.abort(); return }
       const db = request.result
       const tx = request.transaction
-      if (event.oldVersion < 5) {
-        createSchemaStore(db, 'publications', databaseSchema(5).stores.publications)
-      }
+      upgradePublicationStores(db, tx, event.oldVersion)
       if (event.oldVersion < 4) {
         const samples = db.createObjectStore('wordCountSamples', { keyPath: 'sampleId' })
         samples.createIndex('userDayTime', ['userDayId', 'timestamp'], { unique: true })

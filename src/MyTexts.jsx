@@ -15,6 +15,7 @@ import { periodLabel } from './domain/calendarPeriod.js'
 import { filterArchivePeriod, archiveCalendarEntries } from './domain/archivePeriod.js'
 import { archiveSearch } from './domain/archiveSearch.js'
 import MyTextsNavigation from './components/MyTextsNavigation.jsx'
+import { archiveSemanticIndex, archiveSemanticSelection } from './domain/archiveSemanticIndex.js'
 import './MyTexts.css'
 
 function ArchiveRailHost({ textId, register, onActive }) {
@@ -56,13 +57,20 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   const periodChange = useRef(false)
   const resetResults = useRef(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [semanticPage, setSemanticPage] = useState(null)
+  const [semanticSelected, setSemanticSelected] = useState(null)
+  const semanticReturn = useRef(null)
+  const semanticIndex = useMemo(() => archiveSemanticIndex(records ?? []), [records])
+  const semanticSelection = useMemo(() => semanticPage ? archiveSemanticSelection(records ?? [], semanticIndex, semanticPage, semanticSelected) : null,
+    [records, semanticIndex, semanticPage, semanticSelected])
   const [calendarYearHost, setCalendarYearHost] = useState(null)
   const [draftQuery, setDraftQuery] = useState('')
   const [activeQuery, setActiveQuery] = useState('')
   const [activeSearchId, setActiveSearchId] = useState(null)
   const [locateRequest, setLocateRequest] = useState(null)
   const searchResults = useMemo(() => records && activeQuery ? archiveSearch(filterArchivePeriod(records, period), activeQuery) : null, [records, period, activeQuery])
-  const visibleRecords = searchResults?.records ?? (records ? filterArchivePeriod(records, period) : null)
+  const visibleRecords = useMemo(() => semanticSelection ? filterArchivePeriod(semanticSelection.records, period)
+    : searchResults?.records ?? (records ? filterArchivePeriod(records, period) : null), [semanticSelection, searchResults, records, period])
   const effectiveActiveSearchId = searchResults?.occurrences.some(item => item.id === activeSearchId) ? activeSearchId : searchResults?.occurrences[0]?.id ?? null
   const activeIndex = searchResults?.occurrences.findIndex(item => item.id === effectiveActiveSearchId) ?? -1
   const [metadataLayout, setMetadataLayout] = useState(null)
@@ -85,11 +93,11 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   const [hasOpened, setHasOpened] = useState(false)
 
   useLayoutEffect(() => {
-    if (active && returnScroll.current !== null && scrollArea.current) {
+    if (active && !semanticPage && !publicationPage && returnScroll.current !== null && scrollArea.current) {
       scrollArea.current.scrollTop = returnScroll.current
       returnScroll.current = null
     }
-  }, [active])
+  }, [active, semanticPage, publicationPage])
 
   useEffect(() => {
     if (!userId) return
@@ -107,17 +115,17 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
 
   useLayoutEffect(() => {
     const area = scrollArea.current
-    if (!active || !area) return
+    if (!active || publicationPage || !area) return
     const measure = () => area.style.setProperty('--archive-height', `${area.clientHeight}px`)
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(area)
     return () => observer.disconnect()
-  }, [active])
+  }, [active, semanticPage, publicationPage])
 
   useLayoutEffect(() => {
     const area = scrollArea.current
-    if (!area) return
+    if (!area || publicationPage) return
     if (resetResults.current) {
       resetResults.current = false
       const list = area.querySelector('ul')
@@ -126,7 +134,6 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       positioned.current = true
       return
     }
-    const visibleRecords = activeQuery ? archiveSearch(filterArchivePeriod(records ?? [], period), activeQuery).records : records ? filterArchivePeriod(records, period) : null
     if (!visibleRecords?.length) return
     const anchor = pendingCollapse.current
     pendingCollapse.current = null
@@ -172,11 +179,11 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       area.scrollTop += item.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 3
       positioned.current = true
     }
-  }, [records, expanded, period, activeQuery])
+  }, [records, expanded, period, activeQuery, semanticPage, publicationPage, visibleRecords])
 
   useLayoutEffect(() => {
     const area = scrollArea.current
-    if (!active || !area || !metadataHost || !records) return
+    if (!active || publicationPage || !area || !metadataHost || !records) return
     const alignMetadata = () => {
       const viewport = area.getBoundingClientRect()
       const host = metadataHost.getBoundingClientRect()
@@ -204,7 +211,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       window.removeEventListener('resize', alignMetadata)
       observer.disconnect()
     }
-  }, [active, records, expanded, metadataHost, period, calendarOpen, activeQuery])
+  }, [active, records, expanded, metadataHost, period, calendarOpen, activeQuery, semanticPage, publicationPage, visibleRecords])
 
   const changeCriteria = async (nextPeriod, nextQuery) => {
     if (periodChange.current) return
@@ -216,7 +223,8 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       // may have changed which records match while the queue was pending.
       await Promise.all([...editors.current.values()].map(editor => editor.flush()))
       const fresh = [...await listTexts(userId)].sort((a, b) => a.dayKey.localeCompare(b.dayKey))
-      const candidates = filterArchivePeriod(fresh, nextPeriod)
+      const candidates = filterArchivePeriod(semanticPage
+        ? archiveSemanticSelection(fresh, archiveSemanticIndex(fresh), semanticPage, semanticSelection.selected).records : fresh, nextPeriod)
       const result = nextQuery ? archiveSearch(candidates, nextQuery) : null
       const retained = new Set((result?.records ?? candidates).map(record => record.textId))
       const disappearing = visibleRecords.filter(record => !retained.has(record.textId))
@@ -254,14 +262,15 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   }
 
   useLayoutEffect(() => {
-    if (!locateRequest) return
+    if (!locateRequest || publicationPage || !active) return
     const occurrence = searchResults?.occurrences.find(item => item.id === locateRequest.id)
-    if (!occurrence) return
+    if (!occurrence && !locateRequest.markupId) return
     const find = () => [...document.querySelectorAll('[data-search-occurrence]')].find(node => node.dataset.searchOccurrence === occurrence.id)
     const reveal = () => {
-      const element = find()
-      if (!element || !scrollArea.current) return false
-      const bounds = element.getBoundingClientRect()
+      const bounds = locateRequest.markupId
+        ? editors.current.get(locateRequest.textId)?.locateSemantic(locateRequest.markupId)
+        : find()?.getBoundingClientRect()
+      if (!bounds || !scrollArea.current) return false
       const area = scrollArea.current
       const viewport = area.getBoundingClientRect()
       area.scrollTop += bounds.top - viewport.top - area.clientHeight / 3
@@ -273,10 +282,33 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     const observer = new MutationObserver(() => { if (reveal()) observer.disconnect() })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [locateRequest, records, expanded, activeQuery, period, searchResults?.occurrences])
+  }, [locateRequest, records, expanded, activeQuery, period, searchResults?.occurrences, semanticPage, publicationPage, active])
 
-  const toggleRecord = (record) => {
+  const toggleRecord = async (record) => {
     const opening = !expanded.has(record.textId)
+    if (opening && semanticPage) {
+      if (periodChange.current) return
+      periodChange.current = true
+      setChangingPeriod(true); setPeriodError('')
+      try {
+        await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+        await pendingWrites.current()
+        const fresh = [...await listTexts(userId)].sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+        const selection = archiveSemanticSelection(fresh, archiveSemanticIndex(fresh), semanticPage, semanticSelection.selected)
+        const matches = selection.occurrences.filter(item => item.textId === record.textId)
+        const item = matches.find(item => item.id === semanticSelection.selected) ?? matches[0]
+        setRecords(fresh)
+        if (!item) throw new Error('Разметка больше недоступна. Выберите текст из обновлённого списка.')
+        setExpanded(previous => new Set([...previous, record.textId]))
+        setHasOpened(true)
+        pendingExpansion.current = null
+        pendingCollapse.current = null
+        activeRecord.current = record.textId
+        setLocateRequest({ textId: record.textId, markupId: item.markupId })
+      } catch (error) { setPeriodError(error.message || 'Не удалось открыть текст.') }
+      finally { periodChange.current = false; setChangingPeriod(false) }
+      return
+    }
     pendingExpansion.current = opening ? record.textId : null
     if (opening) setHasOpened(true)
     setExpanded((previous) => {
@@ -333,7 +365,82 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     } catch { setPeriodError('Не удалось завершить сохранение. Повторите вход в профиль.') }
     finally { setChangingPeriod(false) }
   }
+  const openSemantic = async page => {
+    if (periodChange.current) return
+    periodChange.current = true
+    setChangingPeriod(true); setPeriodError('')
+    try {
+      await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+      await pendingWrites.current()
+      const fresh = [...await listTexts(userId)].sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+      semanticReturn.current = { expanded: new Set(expanded), hasOpened, scrollTop: scrollArea.current?.scrollTop ?? 0, period, activeQuery, activeSearchId }
+      window.getSelection()?.removeAllRanges()
+      setRecords(fresh)
+      setSemanticSelected(archiveSemanticSelection(fresh, archiveSemanticIndex(fresh), page, null).selected)
+      setSemanticPage(page)
+      setExpanded(new Set())
+      setHasOpened(true)
+      setPeriod(null)
+      setActiveQuery('')
+      setLocateRequest(null)
+      pendingExpansion.current = null
+      pendingCollapse.current = null
+      resetResults.current = true
+    } catch { setPeriodError('Не удалось завершить сохранение или загрузить разметку. Повторите вход.') }
+    finally { periodChange.current = false; setChangingPeriod(false) }
+  }
+  const selectSemantic = async selected => {
+    if (periodChange.current || selected === semanticSelection.selected) return
+    periodChange.current = true
+    setChangingPeriod(true); setPeriodError('')
+    try {
+      await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+      await pendingWrites.current()
+      const fresh = [...await listTexts(userId)].sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+      const index = archiveSemanticIndex(fresh)
+      if (!(semanticPage === 'title' ? index.titles.some(item => item.id === selected) : index.tags.some(item => item.value === selected))) {
+        setRecords(fresh)
+        throw new Error('Разметка больше недоступна. Выберите пункт из обновлённого списка.')
+      }
+      window.getSelection()?.removeAllRanges()
+      setRecords(fresh)
+      setSemanticSelected(selected)
+      setExpanded(new Set())
+      setPeriod(null)
+      setActiveQuery('')
+      setLocateRequest(null)
+      pendingExpansion.current = null
+      pendingCollapse.current = null
+      resetResults.current = true
+    } catch (error) { setPeriodError(error.message || 'Не удалось завершить сохранение.') }
+    finally { periodChange.current = false; setChangingPeriod(false) }
+  }
+  const closeSemantic = async () => {
+    if (periodChange.current) return
+    periodChange.current = true
+    setChangingPeriod(true); setPeriodError('')
+    try {
+      await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+      window.getSelection()?.removeAllRanges()
+      const previous = semanticReturn.current
+      setExpanded(previous?.expanded ?? new Set())
+      setHasOpened(previous?.hasOpened ?? false)
+      setPeriod(previous?.period ?? null)
+      setActiveQuery(previous?.activeQuery ?? '')
+      setActiveSearchId(previous?.activeSearchId ?? null)
+      returnScroll.current = previous?.scrollTop ?? 0
+      setSemanticPage(null)
+      setLocateRequest(null)
+      pendingExpansion.current = null
+      pendingCollapse.current = null
+      resetResults.current = false
+      semanticReturn.current = null
+    } catch { setPeriodError('Не удалось завершить сохранение. Повторите возврат.') }
+    finally { periodChange.current = false; setChangingPeriod(false) }
+  }
   const navigation = <MyTextsNavigation onExit={onExit} searchOpen={searchOpen} onSearchOpen={setSearchOpen}
+    semanticPage={semanticPage} semanticIndex={semanticIndex} semanticSelected={semanticSelection?.selected}
+    onSemanticSelect={selectSemantic} onSemanticOpen={openSemantic} onSemanticBack={closeSemantic}
     publicIdentity={publicIdentity} onOpenProfile={onOpenProfile ? openOwnProfile : undefined}
     draft={draftQuery} onDraft={setDraftQuery} onSubmit={() => changeCriteria(period, draftQuery.trim())}
     results={searchResults} activeIndex={activeIndex} onLocate={locateOccurrence} busy={changingPeriod || publicationBusy || !records} publicationPage={publicationPage} publicationCounts={publicationCounts}
@@ -383,7 +490,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
               </div>
             </> : null}
           </li>)}
-        </ul> : <p>{activeQuery ? 'Совпадений нет.' : period ? 'В выбранном периоде текстов нет.' : 'Сохранённых текстов пока нет.'}</p>}
+        </ul> : <p>{period ? 'В выбранном периоде текстов нет.' : semanticPage ? semanticPage === 'title' ? 'Названий пока нет.' : 'Тегов пока нет.' : activeQuery ? 'Совпадений нет.' : 'Сохранённых текстов пока нет.'}</p>}
     </div>
   </div>
     {active && !publicationPage && metadataHost && metadataLayout && records ? createPortal(

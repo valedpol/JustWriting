@@ -8,9 +8,12 @@ import ReaderFeed from './components/ReaderFeed.jsx'
 import PublicProfileView from './components/PublicProfileView.jsx'
 import { findPublicIdentity } from './storage/publicIdentityRepository.js'
 import Research from './Research'
+import Studio, { StudioNavigation } from './Studio.jsx'
 import ResearchNavigation from './components/ResearchNavigation'
 import WordCounter from './components/WordCounter'
 import WritingEditor from './components/WritingEditor.jsx'
+import WritingTimer from './components/WritingTimer.jsx'
+import { useWritingTimer } from './hooks/useWritingTimer.js'
 import { useWorkspaceScroll } from './hooks/useWorkspaceScroll'
 import { SCREEN_MODES, initialScreen, editorScreenReducer, restoreScreen, rememberSection } from './domain/editorScreen'
 import { assertBackupWriterReady } from './backup/userBackup.js'
@@ -41,6 +44,8 @@ function App() {
   const [{ section, screenMode }, dispatchScreen] = useReducer(editorScreenReducer, initialScreen, () => restoreScreen())
   useEffect(() => { rememberSection(section) }, [section])
   const isToday = section === 'today'
+  const [researchView, setResearchView] = useState('statistics')
+  const [studioView, setStudioView] = useState('philosophy')
   const [publicProfile, setPublicProfile] = useState(null)
   const viewingPublicProfile = (section === 'feed' || section === 'archive') && Boolean(publicProfile)
   const [publicIdentitySnapshot, setPublicIdentity] = useState(null)
@@ -69,6 +74,12 @@ function App() {
   const [settingsStatusHost, setSettingsStatusHost] = useState(null)
   const [backupActive, setBackupActive] = useState(false)
   const [now, setNow] = useState(new Date())
+  const [daySearchOpen, setDaySearchOpen] = useState(false)
+  const daySearchAnchor = useRef(null)
+  const [timerSetupOpen, setTimerSetupOpen] = useState(false)
+  const sessionTimerAnchor = useRef(null)
+  const sessionTimer = useWritingTimer(() => getWordCount(controller?.snapshot.text ?? text))
+  if (sessionTimer.result !== null && daySearchOpen) setDaySearchOpen(false)
   const editorRef = useRef(null)
   const workspaceRef = useRef(null)
   useWorkspaceScroll(workspaceRef, section)
@@ -80,6 +91,8 @@ function App() {
   const countdown = useMemo(() => formatCountdown(dayEndsAt === null ? 0 : (graceUntil ?? dayEndsAt) - now.getTime()), [now, dayEndsAt, graceUntil])
   const setScreenMode = mode => {
     if (mode === SCREEN_MODES.interface) {
+      setDaySearchOpen(false)
+      setTimerSetupOpen(false)
       editorRef.current?.finishComposition()
       editorRef.current?.cancelPanel()
       endWriting()
@@ -88,10 +101,14 @@ function App() {
   }
   const openSection = nextSection => {
     if (backupActive) return
+    setDaySearchOpen(false)
+    setTimerSetupOpen(false)
     editorRef.current?.finishComposition()
     editorRef.current?.cancelPanel()
     endWriting()
     if (nextSection === 'archive' && section !== 'archive') { setArchiveWords(null); setPublicationSummary(null) }
+    if (nextSection === 'studio' && section !== 'studio') setStudioView('philosophy')
+    if (nextSection === 'research' && section !== 'research') setResearchView('statistics')
     if (nextSection !== 'archive') setPublicIdentity(null)
     if (nextSection !== 'feed' || nextSection !== section) setPublicProfile(null)
     dispatchScreen({ type: 'section', section: nextSection })
@@ -117,7 +134,7 @@ function App() {
   }
 
   return (
-    <div className={`app-shell screen-${screenMode}${section === 'feed' || viewingPublicProfile ? ' archive-page feed-page' : section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
+    <div className={`app-shell screen-${screenMode}${section === 'feed' || viewingPublicProfile ? ' archive-page feed-page' : section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : section === 'studio' ? ' studio-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
       <header className="topbar">
         <div className="brand-block">Just Writing</div>
 
@@ -155,10 +172,13 @@ function App() {
               <button
                 type="button"
                 className="screen-mode-button search-button"
-                aria-label="Поиск (скоро)"
-                aria-disabled="true"
+                ref={daySearchAnchor}
+                aria-label="Поиск по текущему дню"
+                aria-expanded={daySearchOpen}
+                aria-controls="quick-day-search"
+                disabled={!isToday || !ready || sessionTimer.result !== null}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={(event) => event.stopPropagation()}
+                onClick={(event) => { event.stopPropagation(); setTimerSetupOpen(false); setDaySearchOpen(open => !open) }}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <circle cx="10.5" cy="10.5" r="6.5" />
@@ -166,14 +186,17 @@ function App() {
                 </svg>
               </button>
             ) : null}
-            {screenMode !== SCREEN_MODES.interface ? (
+            {screenMode !== SCREEN_MODES.interface || (isToday && (sessionTimer.running || sessionTimer.result !== null)) ? (
               <button
                 type="button"
                 className="screen-mode-button"
-                aria-label="Таймер (скоро)"
-                aria-disabled="true"
+                ref={sessionTimerAnchor}
+                aria-label="Таймер письма"
+                aria-expanded={timerSetupOpen}
+                aria-controls="writing-timer-setup"
+                disabled={!isToday || !ready || sessionTimer.running || sessionTimer.result !== null}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={(event) => event.stopPropagation()}
+                onClick={(event) => { event.stopPropagation(); setDaySearchOpen(false); setTimerSetupOpen(open => !open) }}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <circle cx="12" cy="14" r="7" />
@@ -216,6 +239,14 @@ function App() {
           </div>
         </div>
       </header>
+      {isToday && (screenMode !== SCREEN_MODES.interface || sessionTimer.running || sessionTimer.result !== null) ? <WritingTimer timer={sessionTimer} setupOpen={timerSetupOpen} layoutKey={screenMode}
+        anchor={sessionTimerAnchor} metadataHost={archiveMetadataHost} onClose={() => setTimerSetupOpen(false)}
+        onStart={value => {
+          if (!ready || !sessionTimer.start(value)) return
+          setTimerSetupOpen(false); setDaySearchOpen(false)
+          setScreenMode(SCREEN_MODES.standard)
+          requestAnimationFrame(() => editorRef.current?.focus(true))
+        }} /> : null}
 
       {graceUntil && isToday ? <div className="grace-alarm" role="status">
         <strong>ALARM!</strong> Начался новый день. Текст останется в предыдущем.
@@ -230,7 +261,7 @@ function App() {
             </p>
           </div>}
 
-          {viewingPublicProfile ? <nav className="side-menu" aria-label="Публичный профиль"><button type="button" className="menu-item" aria-label={section === 'archive' ? 'Вернуться в Мои тексты' : 'Вернуться в Общую страницу'} onClick={() => setPublicProfile(null)}>←</button></nav> : section === 'research' ? <ResearchNavigation onExit={() => openSection('today')} /> : section === 'archive' ? <div ref={setArchiveNavigationHost} className="archive-navigation-slot" /> : <nav className="side-menu" aria-label="Главное меню">
+          {viewingPublicProfile ? <nav className="side-menu" aria-label="Публичный профиль"><button type="button" className="menu-item" aria-label={section === 'archive' ? 'Вернуться в Мои тексты' : 'Вернуться в Общую страницу'} onClick={() => setPublicProfile(null)}>←</button></nav> : section === 'studio' ? <StudioNavigation view={studioView} onSelect={setStudioView} onExit={() => openSection('today')} /> : section === 'research' ? <ResearchNavigation view={researchView} onSelect={setResearchView} onExit={() => openSection('today')} /> : section === 'archive' ? <div ref={setArchiveNavigationHost} className="archive-navigation-slot" /> : <nav className="side-menu" aria-label="Главное меню">
             <button type="button" className={`menu-item${section === 'archive' ? ' is-active' : ''}`} aria-current={section === 'archive' ? 'page' : undefined} onClick={() => openSection('archive')}>
               Мои тексты
             </button>
@@ -240,8 +271,8 @@ function App() {
             <button type="button" className={`menu-item${section === 'feed' ? ' is-active' : ''}`} aria-current={section === 'feed' ? 'page' : undefined} onClick={() => openSection('feed')}>
               Общая страница
             </button>
-            <button type="button" className="menu-item">
-              Проект студии
+            <button type="button" className={`menu-item${section === 'studio' ? ' is-active' : ''}`} aria-current={section === 'studio' ? 'page' : undefined} onClick={() => openSection('studio')}>
+              Студия
             </button>
             <button type="button" className={`menu-item${section === 'research' ? ' is-active' : ''}`} aria-current={section === 'research' ? 'page' : undefined} onClick={() => openSection('research')}>
               Исследования
@@ -256,9 +287,10 @@ function App() {
           <div className="editor-shell today-editor-shell" hidden={!isToday}>
             <WritingEditor ref={editorRef} controller={controller} active={isToday} ready={ready}
               writing={screenMode !== SCREEN_MODES.interface} metadataHost={archiveMetadataHost}
+              quickSearchOpen={daySearchOpen && screenMode !== SCREEN_MODES.interface} searchAnchor={daySearchAnchor} onSearchClose={() => setDaySearchOpen(false)}
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
-          {section === 'feed' ? <ReaderFeed key={userId} userId={userId} metadataHost={archiveMetadataHost} statusHost={settingsStatusHost} authorInfoHost={publicAuthorInfoHost} profile={publicProfile} onOpenProfile={setPublicProfile} onProfileLoaded={profileLoaded} /> : section === 'research' ? <Research userId={userId} flush={flush} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
+          {section === 'feed' ? <ReaderFeed key={userId} userId={userId} metadataHost={archiveMetadataHost} statusHost={settingsStatusHost} authorInfoHost={publicAuthorInfoHost} profile={publicProfile} onOpenProfile={setPublicProfile} onProfileLoaded={profileLoaded} /> : section === 'studio' ? <Studio view={studioView} /> : section === 'research' ? <Research userId={userId} flush={flush} view={researchView} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
             onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <>
             <MyTexts active={!viewingPublicProfile} publicIdentity={ownPublicIdentity} onOpenProfile={setPublicProfile} navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} onPublicationSummary={setPublicationSummary} />
             {viewingPublicProfile ? <div className="reader-feed"><PublicProfileView key={publicProfile.publicId} publicId={publicProfile.publicId} metadataHost={archiveMetadataHost} authorInfoHost={publicAuthorInfoHost} statusHost={settingsStatusHost} onLoaded={profileLoaded} /></div> : null}
@@ -273,7 +305,7 @@ function App() {
           {isToday ? <>
             <WordCounter count={currentDayWords} goal={localProfile?.dailyWordGoal} />
           <span className="footer-status-text" role="status" title={error || 'Локальное хранение на этом устройстве'}>{status === 'loading' ? 'Загружаю' : status === 'saving' ? 'Сохраняю' : status === 'error' || status === 'load-error' ? 'Ошибка сохранения' : status === 'saved' ? 'Сохранено' : ''}</span>
-          </> : section === 'archive' && !viewingPublicProfile ? publicationSummary ? publicationSummary.channel ?
+          </> : section === 'studio' && studioView === 'philosophy' ? <span className="footer-status-text studio-publication-note">© 2026 <strong><em>Just Writing</em></strong> · Сохранено и опубликовано</span> : section === 'archive' && !viewingPublicProfile ? publicationSummary ? publicationSummary.channel ?
             <span className="footer-status-text" role="status">Опубликовано {publicationSummary.wordCount ?? '…'} {wordCountNoun(publicationSummary.wordCount ?? 0)}</span> : null : <>
             <span className="footer-status-text">Написано</span>
             <span>{archiveWords ?? '…'} слов</span>

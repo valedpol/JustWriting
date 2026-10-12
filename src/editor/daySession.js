@@ -38,16 +38,18 @@ export async function openDaySession({ profile, now = Date.now(), sessionId = nu
     const base = switched ? { ...resolved, state: createState(resolved.record) }
       : { ...current, context: resolved.context, writable: resolved.writable }
     const crossing = operation.dayKey !== resolved.context.dayKey
-    let state, changed
-    if (crossing) ({ state, changed } = transferDayOperation(base.state, operation))
+    let state, changed, steps
+    if (crossing) ({ state, changed, steps } = transferDayOperation(base.state, operation))
     else {
       if (base.state !== operation.beforeState) throw new Error('Устаревшее состояние редактора; старые позиции не применены')
       state = operation.afterState
       changed = operation.changed
+      steps = operation.steps
     }
     // On the same day retain our committed revision, not a fresher foreign one
     // returned by resolveToday. The repository must detect a multi-tab conflict.
-    const record = changed ? await io.saveRichText(base.context, base.record, editorSnapshot(state), operation.acceptedAt, operation.sessionId) : base.record
+    const record = changed ? await io.saveRichText(base.context, base.record, editorSnapshot(state), operation.acceptedAt, operation.sessionId,
+      { beforeDocument: base.state.doc.toJSON(), steps }) : base.record
     current = { ...base, state, record }
     let samplingError = null
     if (changed && record && operation.sessionId) {
@@ -158,7 +160,7 @@ export async function openDaySession({ profile, now = Date.now(), sessionId = nu
     updateComposition(id, transaction) {
       if (receipts.has(id)) return { ignored: true }
       if (!composition || composition.id !== id) throw new Error('IME-композиция не найдена')
-      const tracked = trackSemanticTransaction(composition.state, transaction)
+      const tracked = trackSemanticTransaction(composition.state, transaction, { trackPublications: true })
       const applied = composition.state.applyTransaction(tracked)
       if (!applied.transactions.length) throw new Error('Редактор отклонил IME-операцию')
       for (const step of tracked.steps) composition.transaction.step(step)

@@ -251,5 +251,5 @@ test('random public identity initializes once concurrently, persists consent aft
   await assert.rejects(saveProfileSetting(profile.userId, 'allowNameDisclosure', 'true'), /boolean/)
   await assert.rejects(saveProfileSetting('other', 'allowNameDisclosure', true), /Профиль изменился/)
   assert.deepEqual(await loadPublicIdentity(profile.userId), identity)
-  assert.equal((await openDatabase()).version, 5)
+  assert.equal((await openDatabase()).version, 6)
 })

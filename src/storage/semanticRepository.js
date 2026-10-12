@@ -2,11 +2,12 @@ import { transaction } from './database.js'
 import { archiveDocument } from '../editor/archiveDocument.js'
 import { CONTENT_FORMAT, CONTENT_VERSION, parseDocument } from '../editor/document.js'
 import { parseSemanticMarkup } from '../editor/semanticSnapshot.js'
+import { advanceAnchorRevision } from './publicationAnchorRepository.js'
 
 // This path cannot accept author text, formatting, day or session changes.
 export function saveSemanticMarkup(userId, previous, markup) {
   const submitted = structuredClone(markup)
-  return transaction(['texts'], 'readwrite', (tx, done, fail) => {
+  return transaction(['texts', 'publicationAnchors'], 'readwrite', (tx, done, fail) => {
     const store = tx.objectStore('texts')
     const request = store.get(previous.textId)
     request.onsuccess = () => {
@@ -20,7 +21,7 @@ export function saveSemanticMarkup(userId, previous, markup) {
         const record = { ...current, semanticMarkup, revision: (current.revision ?? 0) + 1 }
         if (current.contentFormat === undefined) Object.assign(record, { contentFormat: CONTENT_FORMAT, contentVersion: CONTENT_VERSION, document })
         store.put(record)
-        done(record)
+        advanceAnchorRevision(tx, current, record, done, fail)
       } catch (error) { fail(error) }
     }
   })

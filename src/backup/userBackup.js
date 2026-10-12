@@ -4,6 +4,7 @@ import { validateBackup, restoreToNewDatabase, verifyRestoredDatabase } from './
 import { bytesHash } from '../utils/files.js'
 import { parseDocument } from '../editor/document.js'
 import { parseSemanticMarkup } from '../editor/semanticSnapshot.js'
+import { archiveDocument } from '../editor/archiveDocument.js'
 
 import { databaseSchema } from '../storage/databaseSchema.js'
 
@@ -42,6 +43,18 @@ export function assertCompatibleBackup(data) {
     const day = days.get(sample.userDayId)
     if (!day || day.userId !== sample.userId || day.dayKey !== sample.dayKey || !Number.isFinite(sample.timestamp) || !Number.isFinite(sample.wordCount)) throw new Error('Некорректные наблюдения количества слов.')
   }
+  const publications = new Map((rows.publications ?? []).map(row => [row.publicationId, row]))
+  const texts = new Map(rows.texts.map(row => [row.textId, row]))
+  for (const anchor of rows.publicationAnchors ?? []) {
+    const publication = publications.get(anchor.publicationId), text = texts.get(anchor.sourceId)
+    if (!publication || !text || anchor.userId !== publication.userId || anchor.userId !== text.userId ||
+      anchor.sourceType !== 'archive' || publication.source.sourceType !== anchor.sourceType ||
+      publication.source.sourceId !== anchor.sourceId || anchor.sourceRevision !== text.revision ||
+      anchor.coordinateVersion !== 1 || !['attached', 'detached'].includes(anchor.status)) throw new Error('Некорректная привязка публикации.')
+    const range = anchor.range
+    if (anchor.status === 'detached' ? range !== null : !range || !Number.isSafeInteger(range.from) || !Number.isSafeInteger(range.to) ||
+      range.from < 1 || range.from >= range.to || range.to >= parseDocument(archiveDocument(text)).content.size) throw new Error('Некорректный диапазон публикации.')
+  }
 }
 
 export function createUserBackupService({ coordinator = maintenance, factory = globalThis.indexedDB,
@@ -72,6 +85,7 @@ export function createUserBackupService({ coordinator = maintenance, factory = g
         capturedAt: data.capturedAt, origin: data.origin, dbVersion: data.databaseVersion,
         formatVersion: databaseSchema(data.databaseVersion).formatVersion,
         counts: restored.counts, verifiedFromDisk: true, restoreVerified: restored.verified,
+        migrationVerified: restored.migrationVerified, migratedDbVersion: restored.migratedDatabaseVersion,
         isolatedRestoreName: name, isolatedRestoreDeleted: restored.deleted }
     },
   }

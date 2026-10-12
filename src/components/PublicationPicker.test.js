@@ -32,7 +32,7 @@ const { transaction, openDatabase } = await server.ssrLoadModule('/src/storage/d
 const { createPublications } = await server.ssrLoadModule('/src/storage/publicationRepository.js')
 const { maintenance } = await server.ssrLoadModule('/src/runtime/maintenance.js')
 after(async () => { (await openDatabase()).close(); await server.close(); dom.window.close() })
-const all = () => transaction(['settings', 'texts', 'userDays', 'wordCountSamples', 'publications'], 'readonly', (tx, done) => {
+const all = () => transaction(['settings', 'texts', 'userDays', 'wordCountSamples', 'publications', 'publicationAnchors'], 'readonly', (tx, done) => {
   const result = {}; done(result)
   for (const name of tx.objectStoreNames) { const read = tx.objectStore(name).getAll(); read.onsuccess = () => { result[name] = read.result } }
 })
@@ -93,9 +93,43 @@ async function fixture(markup = []) {
     for (const channel of channels) await click(picker().querySelectorAll('input')[['profile', 'feed', 'internet'].indexOf(channel)])
     await click([...picker().querySelectorAll('button')].find(button => button.textContent === 'Опубликовать'))
   }
-  return { record, controller, container, sidebar, root, render, select, showPicker, confirm,
+  return { record, controller, container, sidebar, root, render, select, showPicker, confirm, view: () => ref.current.instance,
     async close() { await act(async () => root.unmount()); off(); container.remove(); sidebar.remove(); window.getSelection().removeAllRanges() } }
 }
+
+test('archive marker and picker resolve the attached live range, never historical coordinates; detached marker disappears', async () => {
+  const f = await fixture()
+  try {
+    const source = { sourceType: 'archive', sourceId: f.record.textId, sourceRevision: f.record.revision, coordinateVersion: 1,
+      range: { from: 7, to: 11 }, archive: { userDayId: f.record.userDayId, dayKey: f.record.dayKey } }
+    const [p] = await createPublications(f.record.userId, { source, channels: ['feed'] })
+    await transaction(['publicationAnchors'], 'readwrite', tx => {
+      const read = tx.objectStore('publicationAnchors').get(p.publicationId)
+      read.onsuccess = () => tx.objectStore('publicationAnchors').put({ ...read.result, range: { from: 1, to: 5 } })
+    })
+    await act(async () => f.root.render(null)); await f.render()
+    await settle(() => f.sidebar.querySelector('.publication-marker'))
+    const measured = [], view = f.view(), originalCoords = view.coordsAtPos.bind(view)
+    view.coordsAtPos = (...args) => { measured.push(args[0]); return originalCoords(...args) }
+    await act(async () => window.dispatchEvent(new dom.window.Event('resize')))
+    assert.ok(measured.includes(1), 'marker is measured at the live start')
+    assert.equal(measured.includes(7), false, 'historical start is not used by the rail')
+    await f.showPicker({ from: 1, to: 5 })
+    assert.equal(picker().querySelectorAll('input')[1].disabled, true)
+    await click([...picker().querySelectorAll('button')].find(b => b.textContent === 'Отмена'))
+    assert.equal(f.controller.state.doc.textContent, 'alpha beta gamma')
+    await transaction(['publicationAnchors'], 'readwrite', tx => {
+      const read = tx.objectStore('publicationAnchors').get(p.publicationId)
+      read.onsuccess = () => tx.objectStore('publicationAnchors').put({ ...read.result, status: 'detached', range: null })
+    })
+    await act(async () => f.root.render(null)); await f.render()
+    await f.showPicker({ from: 7, to: 11 })
+    assert.equal(picker().querySelectorAll('input')[1].disabled, false)
+    assert.equal(f.sidebar.querySelector('.publication-marker'), null)
+    const stored = (await all()).publications.find(row => row.publicationId === p.publicationId)
+    assert.deepEqual(stored.source.range, { from: 7, to: 11 })
+  } finally { await f.close() }
+})
 
 for (const channels of [['profile'], ['feed'], ['internet'], ['profile', 'feed', 'internet']]) {
   test(`archive UI publishes ${channels.join('+')}, preserves source stores and displays derived markers after remount`, async () => {
@@ -123,8 +157,8 @@ for (const channels of [['profile'], ['feed'], ['internet'], ['profile', 'feed',
         if (p.channel !== 'profile') assert.equal(p.authorVisibility, 'visible')
       }
       const labels = { profile: '↗ В профиле', feed: '↗ В ленте', internet: '↗ В интернете' }
-      assert.deepEqual([...f.sidebar.querySelectorAll('.publication-marker')].map(el => el.textContent).sort(), channels.map(c => labels[c]).sort())
-      assert.equal(f.sidebar.querySelector('.publication-marker button'), null)
+      assert.deepEqual([...f.sidebar.querySelectorAll('.publication-marker-value')].map(el => el.textContent).sort(), channels.map(c => labels[c]).sort())
+      assert.ok(f.sidebar.querySelector('.publication-marker-remove'))
       await act(async () => f.root.render(null))
       await f.render(true)
       await settle(() => f.sidebar.querySelectorAll('.publication-marker').length === channels.length)
@@ -140,7 +174,7 @@ test('cancel picker makes no writes; exact existing channel is disabled while ot
     assert.deepEqual(await all(), before)
     await f.showPicker(); await f.confirm(['profile']); await settle(() => !picker())
     await f.select(); await click(publishButton())
-    await settle(() => picker()?.querySelector('input').checked)
+    await settle(() => picker()?.querySelector('input').checked && !picker().querySelectorAll('input')[1].disabled)
     assert.equal(picker().querySelector('input').disabled, true)
     assert.ok(picker().textContent.includes('В профиле'))
     assert.equal(picker().querySelectorAll('input')[1].disabled, false)
@@ -299,6 +333,151 @@ test('archive calendar readonly repository loads saved userDays for the owner wi
     assert.equal(days[0].goalReached, true)
     assert.equal(days[0].dailyWordGoal, 100)
     assert.equal(days[0].state, 'closed')
+    assert.deepEqual(await all(), before)
+  } finally { await f.close() }
+})
+
+test('manual reattach is offered only for detached publications of the selected source; choosing/canceling writes nothing, confirmation writes only anchor and survives remount', async () => {
+  const f = await fixture()
+  try {
+    const source = { sourceType: 'archive', sourceId: f.record.textId, sourceRevision: 3, coordinateVersion: 1,
+      range: { from: 1, to: 6 }, archive: { userDayId: f.record.userDayId, dayKey: f.record.dayKey } }
+    const [publication] = await createPublications(f.record.userId, { source, channels: ['feed'] })
+    await transaction(['publicationAnchors'], 'readwrite', tx => tx.objectStore('publicationAnchors').delete(publication.publicationId))
+    await act(async () => f.root.render(null)); await f.render()
+    await act(async () => { await all() })
+    assert.equal(f.sidebar.querySelector('.publication-marker'), null)
+    assert.equal(picker(), null, 'no unsolicited reattach or automatic repair')
+    const before = await all()
+    await f.showPicker({ from: 7, to: 11 })
+    const choose = () => picker().querySelector('.publication-reattach > button')
+    await click(choose())
+    assert.equal(picker().querySelector('.publication-reattach-snapshot').textContent, 'alpha')
+    assert.deepEqual(await all(), before, 'candidate selection alone makes no write')
+    await click([...picker().querySelectorAll('button')].find(b => b.textContent === 'Отмена'))
+    assert.deepEqual(await all(), before)
+    await f.showPicker({ from: 7, to: 11 }); await click(choose())
+    await click([...picker().querySelectorAll('button')].find(b => b.textContent === 'Привязать к выделенному фрагменту'))
+    await settle(() => !picker() && f.sidebar.querySelector('.publication-marker-value'))
+    const after = await all(), anchor = after.publicationAnchors.find(a => a.publicationId === publication.publicationId)
+    assert.deepEqual(anchor.range, { from: 7, to: 11 })
+    assert.equal(anchor.status, 'attached')
+    for (const name of ['texts', 'userDays', 'settings', 'wordCountSamples', 'publications']) assert.deepEqual(after[name], before[name])
+    await act(async () => f.root.render(null)); await f.render()
+    await settle(() => f.sidebar.querySelector('.publication-marker-value'))
+    await click(f.sidebar.querySelector('.publication-marker-value'))
+    await settle(() => f.container.querySelector('.archive-publication-highlight'))
+    assert.equal(f.container.querySelector('.archive-publication-highlight').textContent, 'beta', 'manual range may differ from immutable snapshot')
+  } finally { await f.close() }
+})
+
+test('manual reattach rejects a stale source revision after choosing a candidate without altering publication or anchor', async () => {
+  const f = await fixture()
+  try {
+    const source = { sourceType: 'archive', sourceId: f.record.textId, sourceRevision: 3, coordinateVersion: 1,
+      range: { from: 1, to: 6 }, archive: { userDayId: f.record.userDayId, dayKey: f.record.dayKey } }
+    const [publication] = await createPublications(f.record.userId, { source, channels: ['feed'] })
+    await transaction(['publicationAnchors'], 'readwrite', tx => tx.objectStore('publicationAnchors').delete(publication.publicationId))
+    await f.showPicker({ from: 7, to: 11 })
+    await click(picker().querySelector('.publication-reattach > button'))
+    await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put({ ...f.record, revision: 4 }))
+    const before = await all()
+    await click([...picker().querySelectorAll('button')].find(b => b.textContent === 'Привязать к выделенному фрагменту'))
+    await settle(() => picker()?.querySelector('[role="alert"]'))
+    assert.deepEqual(await all(), before)
+  } finally { await f.close() }
+})
+
+test('marker toggles only live highlight, preserves text selection and readonly protection, and removes one publication only after confirmation', async () => {
+  const f = await fixture()
+  try {
+    await f.showPicker({ from: 7, to: 11 }); await f.confirm(['profile', 'feed', 'internet']); await settle(() => !picker())
+    const before = await all(), own = before.publications.filter(p => p.userId === f.record.userId)
+    const feed = () => [...f.sidebar.querySelectorAll('.publication-marker')].find(marker => marker.querySelector('.publication-marker-value').textContent === '↗ В ленте')
+    const initialSelection = f.controller.state.selection
+    await click(feed().querySelector('.publication-marker-value'))
+    await settle(() => !!f.container.querySelector('.archive-publication-highlight'))
+    assert.equal(f.container.querySelector('.archive-publication-highlight').textContent, 'beta')
+    assert.ok(f.controller.state.selection.eq(initialSelection))
+    assert.equal(f.view().editable, false)
+    assert.deepEqual(await all(), before)
+    await click(feed().querySelector('.publication-marker-value'))
+    assert.equal(f.container.querySelector('.archive-publication-highlight'), null)
+    await click(feed().querySelector('.publication-marker-value'))
+    await click(feed().querySelector('.publication-marker-remove'))
+    assert.ok(feed().textContent.includes('Снять публикацию из Ленты?'))
+    const cancel = () => [...feed().querySelectorAll('button')].find(b => b.textContent === 'Отмена')
+    assert.ok(cancel().classList.contains('is-active'))
+    await click(cancel())
+    assert.equal(feed().querySelector('.publication-marker-confirmation'), null)
+    assert.deepEqual(await all(), before)
+    await click(feed().querySelector('.publication-marker-remove'))
+    await click([...feed().querySelectorAll('button')].find(b => b.textContent === 'Снять'))
+    await settle(() => !feed())
+    assert.equal(f.container.querySelector('.archive-publication-highlight'), null)
+    const after = await all(), removed = own.find(p => p.channel === 'feed')
+    assert.deepEqual(after.publications, before.publications.filter(p => p.publicationId !== removed.publicationId))
+    assert.deepEqual(after.publicationAnchors, before.publicationAnchors.filter(a => a.publicationId !== removed.publicationId))
+    for (const name of ['texts', 'userDays', 'settings', 'wordCountSamples']) assert.deepEqual(after[name], before[name])
+    assert.equal(f.sidebar.querySelectorAll('.publication-marker').length, 2)
+  } finally { await f.close() }
+})
+
+for (const [name, range, titles, expected] of [
+  ['exact', { from: 7, to: 11 }, [label('title', 'Current title', { from: 7, to: 11 })], 'Current title'],
+  ['wider', { from: 1, to: 17 }, [label('title', 'Current title', { from: 7, to: 11 })], null],
+  ['narrower', { from: 8, to: 10 }, [label('title', 'Current title', { from: 7, to: 11 })], null],
+  ['overlap', { from: 5, to: 9 }, [label('title', 'Current title', { from: 7, to: 11 })], null],
+  ['same start, wider', { from: 7, to: 14 }, [label('title', 'Current title', { from: 7, to: 11 })], null],
+  ['unfinished', { from: 7, to: 11 }, [label('title', 'Current title', null)], null],
+  ['ambiguous exact titles', { from: 7, to: 11 }, [label('a', 'One', { from: 7, to: 11 }), label('b', 'Two', { from: 7, to: 11 })], null],
+  ['canonical whole text', { from: 1, to: 17 }, [label('title', 'Current title', { from: 0, to: 18 })], 'Current title'],
+  ['structural-only title', { from: 7, to: 11 }, [label('title', 'Current title', { from: 0, to: 1 })], null],
+  ['tag is not a title', { from: 7, to: 11 }, [label('tag', 'Current title', { from: 7, to: 11 }, 'tag')], null],
+  ['same exact title repeated', { from: 7, to: 11 }, [label('a', 'Current title', { from: 7, to: 11 }), label('b', 'Current title', { from: 7, to: 11 })], 'Current title'],
+]) {
+  test(`publication marker title uses current exact live range: ${name}; historical snapshot title is never a fallback`, async () => {
+    const f = await fixture(titles)
+    try {
+      const source = { sourceType: 'archive', sourceId: f.record.textId, sourceRevision: 3, coordinateVersion: 1,
+        range, archive: { userDayId: f.record.userDayId, dayKey: f.record.dayKey } }
+      // This legacy label represents markup added after publication. The
+      // source adapter correctly refuses to create from an empty title range.
+      if (name === 'structural-only title') await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put({ ...f.record, semanticMarkup: [] }))
+      const [publication] = await createPublications(f.record.userId, { source, channels: ['feed'] })
+      if (name === 'structural-only title') await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put(f.record))
+      // A historical snapshot title must not decide the current rail label.
+      await transaction(['publications'], 'readwrite', tx => tx.objectStore('publications').put({ ...publication,
+        snapshot: { ...publication.snapshot, title: 'Historical title' } }))
+      const before = await all()
+      await act(async () => f.root.render(null)); await f.render()
+      await settle(() => !!f.sidebar.querySelector('.publication-marker-value'))
+      const marker = f.sidebar.querySelector('.publication-marker')
+      assert.equal(marker.querySelector('.publication-marker-title')?.textContent ?? null, expected ? ` · ${expected}` : null)
+      assert.equal(marker.textContent.includes('Historical title'), false)
+      assert.equal(f.sidebar.querySelectorAll('.semantic-value[data-kind="title"]').length, titles.filter(item => item.kind === 'title').length, 'independent archive semantic titles remain available')
+      await click(marker.querySelector('.publication-marker-value'))
+      await settle(() => !!f.container.querySelector('.archive-publication-highlight'))
+      assert.equal(f.container.querySelector('.archive-publication-highlight').textContent, f.controller.state.doc.textBetween(range.from, range.to))
+      assert.deepEqual(await all(), before, 'marker presentation/highlight write no data')
+    } finally { await f.close() }
+  })
+}
+
+test('marker title follows a reattached live range even when historical source range differs', async () => {
+  const f = await fixture([label('title', 'Current title', { from: 7, to: 11 })])
+  try {
+    const source = { sourceType: 'archive', sourceId: f.record.textId, sourceRevision: 3, coordinateVersion: 1,
+      range: { from: 1, to: 17 }, archive: { userDayId: f.record.userDayId, dayKey: f.record.dayKey } }
+    const [publication] = await createPublications(f.record.userId, { source, channels: ['feed'] })
+    await transaction(['publicationAnchors'], 'readwrite', tx => {
+      const read = tx.objectStore('publicationAnchors').get(publication.publicationId)
+      read.onsuccess = () => tx.objectStore('publicationAnchors').put({ ...read.result, range: { from: 7, to: 11 } })
+    })
+    const before = await all()
+    await act(async () => f.root.render(null)); await f.render()
+    await settle(() => !!f.sidebar.querySelector('.publication-marker-title'))
+    assert.equal(f.sidebar.querySelector('.publication-marker-title').textContent, ' · Current title')
     assert.deepEqual(await all(), before)
   } finally { await f.close() }
 })

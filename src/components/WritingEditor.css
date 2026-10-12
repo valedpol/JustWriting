@@ -79,3 +79,13 @@
 .publication-picker p { margin: 8px 0; white-space: normal; }
 .publication-picker button:disabled { opacity: .45; cursor: default; }
 .publication-marker { flex-basis: 100%; font-size: 14px; font-weight: 400; }
+.publication-marker { position: relative; padding-right: 18px; }
+.publication-marker-remove { position: absolute; top: 0; right: 0; }
+.publication-marker-value[aria-pressed=true], .publication-marker-actions .is-active { background: #f0f0f0; }
+.publication-marker-actions { display: flex; gap: 12px; margin-top: 4px; }
+.publication-marker-confirmation { margin-top: 4px; }
+.archive-publication-highlight { background: #eee9d5; }
+.publication-reattach { margin-top: 12px; }
+.publication-reattach > button { display: block; text-align: left; white-space: normal; }
+.publication-reattach-snapshot { max-height: 160px; overflow-y: auto; font: 400 15px/1.5 Georgia, 'Times New Roman', serif; }
+.publication-picker { max-height: min(420px, 65vh); overflow-y: auto; }

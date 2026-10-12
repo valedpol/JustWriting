@@ -1,8 +1,12 @@
+import ArchiveSemanticSelector from './ArchiveSemanticSelector.jsx'
+
 const channels = [['profile', 'Профиль'], ['feed', 'Лента'], ['internet', 'Интернет']]
 const tools = ['Поиск', 'Названия', 'Теги', 'Публикации']
 const noun = (n, forms) => forms[n % 100 >= 11 && n % 100 <= 14 ? 2 : n % 10 === 1 ? 0 : n % 10 >= 2 && n % 10 <= 4 ? 1 : 2]
 
-export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, draft, onDraft, onSubmit, results, activeIndex, onLocate, busy, publicationPage, publicationCounts, onPublicationsOpen, onPublicationChannel, onPublicationsBack, publicIdentity, onOpenProfile }) {
+export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, draft, onDraft, onSubmit, results, activeIndex, onLocate, busy, publicationPage, publicationCounts, onPublicationsOpen, onPublicationChannel, onPublicationsBack, publicIdentity, onOpenProfile, semanticPage, semanticIndex, semanticSelected, onSemanticSelect, onSemanticOpen, onSemanticBack }) {
+  if (semanticPage) return <ArchiveSemanticSelector page={semanticPage} index={semanticIndex} selected={semanticSelected}
+    onSelect={onSemanticSelect} onBack={onSemanticBack} busy={busy} />
   return <nav className="side-menu research-local-menu my-texts-local-menu" aria-label="Мои тексты">
     <span className="menu-item">Мои тексты</span>
     <div className="research-local-children">
@@ -35,8 +39,8 @@ export default function MyTextsNavigation({ onExit, searchOpen, onSearchOpen, dr
           </div> : null}
         </div> : null}
       </> : <>{tools.map(label => <button key={label} type="button"
-        className={`menu-item${label === 'Публикации' ? ' my-texts-publications' : ''}`} disabled={!['Поиск', 'Публикации'].includes(label) || busy}
-        onClick={label === 'Поиск' ? () => onSearchOpen(true) : label === 'Публикации' ? onPublicationsOpen : undefined}>
+        className={`menu-item${label === 'Публикации' ? ' my-texts-publications' : ''}`} disabled={busy}
+        onClick={label === 'Поиск' ? () => onSearchOpen(true) : label === 'Публикации' ? onPublicationsOpen : () => onSemanticOpen(label === 'Названия' ? 'title' : 'tag')}>
         {label}
       </button>)}
         {publicIdentity?.profileVisible === true && onOpenProfile ? <button type="button" className="menu-item" disabled={busy} onClick={onOpenProfile}>Профиль</button> : null}

@@ -17,7 +17,7 @@ export function canonicalArchiveRange(doc, range) {
 
 // Map document positions to the original string, retaining CRLF/CR verbatim.
 // Refuse inconsistent content/document rather than silently normalize content.
-function contentOffsets(doc, content) {
+export function contentPositionMap(doc, content) {
   if (typeof content !== 'string' || content.replace(/\r\n?/g, '\n') !== documentToContent(doc.toJSON())) {
     throw new Error('Source content/document mismatch')
   }
@@ -44,10 +44,15 @@ function contentOffsets(doc, content) {
       positions.set(start + block.nodeSize, offset)
     }
   })
-  return position => {
+  const offsetAt = position => {
     if (!positions.has(position)) throw new Error('Range must end at content boundaries')
     return normalizedOffsets[positions.get(position)]
   }
+  return { offset: offsetAt, position(offset, association = 1) {
+    const matches = [...positions].filter(([, normalized]) => normalizedOffsets[normalized] === offset).map(([position]) => position)
+    if (!matches.length) throw new Error('Content offset has no document position')
+    return association > 0 ? Math.max(...matches) : Math.min(...matches)
+  } }
 }
 
 export function assertArchiveSource(userId, source, text, day) {
@@ -72,7 +77,7 @@ export async function prepareArchiveSnapshot(userId, source, text, day) {
   assertArchiveSource(userId, source, text, day)
   const document = archiveDocument(text), doc = parseDocument(document)
   const range = canonicalArchiveRange(doc, source.range)
-  const offset = contentOffsets(doc, text.content)
+  const offset = contentPositionMap(doc, text.content).offset
   const content = text.content.slice(offset(range.from), offset(range.to))
   if (!content.length) throw new Error('Empty publication text')
   const fragment = doc.slice(range.from, range.to, true).content

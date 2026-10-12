@@ -1,6 +1,7 @@
 # Publications v1 — model and repository (stage B)
 
-The v5 store and its unique index were added in stage A. These APIs perform ordinary fenced
+The v5 store was added in stage A; v6 separates mutable live anchors from
+immutable historical publication records. These APIs perform ordinary fenced
 application transactions and cannot write while maintenance is active.
 
 ## API
@@ -29,9 +30,9 @@ saved revision rather than silently publish a changed selection.
 
 The final transaction rereads text/day, verifies the source fingerprint and
 revision, reads author/settings, then uses `add` for all channels. Any conflict
-aborts the entire transaction. Its only mutations are in `publications`; it
-never puts/deletes source texts, userDays, samples or settings. Source type is
-part of the unique index; v1's archive adapter rejects other types. A future
+aborts the entire transaction. Creation writes only `publications` and
+`publicationAnchors`; it never puts/deletes source texts, userDays, samples or
+settings. Source type is part of the live identity; v1's archive adapter rejects other types. A future
 project adapter can reuse the identity without conflating project and archive.
 
 Canonicalization changes only outer document selection boundaries to equivalent
@@ -58,7 +59,7 @@ Missing identity fields are initialized once in a maintenance-fenced settings-on
 transaction; subsequent reads are readonly. Publication objects are never rewritten.
 
 `deletePublication(userId, publicationId)` deletes exactly one existing owned
-record, after checking ownership in the same transaction. Missing/foreign IDs
+record and its anchor, after checking ownership in the same transaction. Missing/foreign IDs
 reject. Republish is a new record/ID/time; no ghost, undo or source mutation.
 
 Feed/Internet legacy private author metadata is read from `settings.localProfile`
@@ -101,7 +102,101 @@ contract, not protection from direct DevTools writes to IndexedDB.
 
 Tests use only independent fake IndexedDB UUID databases, including fixtures for
 three userIds, concurrency conflicts, multi-channel rollback, source preservation,
-full reopen and backup v2 restore/reopen/compare of repository-created records.
+full reopen and backup v3 restore/reopen/compare of repository-created records,
+plus v1/v2 restore followed by a lossless isolated upgrade to v6.
+
+## Live source anchors (v6)
+
+`publication.source.range`, source revision/hashes and snapshot remain immutable
+historical provenance. `publicationAnchors`, keyed by publicationId, stores
+owner, sourceType/sourceId, coordinateVersion, current sourceRevision, status
+(`attached` or `detached`) and range (null when detached). No display name,
+title, snapshot content or editor history is duplicated there.
+
+`listArchivePublications(userId, sourceId)` reads publications, text revision and
+anchors in one readonly transaction. Its UI projection carries `liveAnchor`;
+missing/stale anchors never fall back to historical coordinates. Rail positioning
+and picker duplicate state use `attachedLiveRange`. Public reader/owner snapshot
+views continue using immutable publication content only.
+
+Exact duplicates are checked atomically against active attached anchors of the
+same owner/source/channel. Overlaps and nesting are allowed. A detached record
+does not block a new exact-range publication. The historical range index is
+non-unique; two ranges can converge during an edit or Undo without blocking the
+source save. A revision-inconsistent attached anchor fails closed on creation.
+
+Accepted editor steps travel through the day queue to the repository. Before
+mapping, the repository rereads source revision, replays whitelisted steps against
+the actual source document and verifies the resulting document equals the saved
+snapshot. Source/day updates and anchor updates commit in one transaction.
+IME, transfer to another day and retries use the actual accepted steps. Legacy
+archive hard-break coordinates convert to editor paragraph coordinates through
+original-string offsets only during a real edit, without altering the publication.
+Readonly archive formatting/semantic saves preserve coordinates and atomically
+advance anchor revision under the existing archive whitelist.
+
+Positional steps are wrapped in reversible `PublicationTextStep` inside the
+existing `SemanticStep`. A full deletion/replacement detaches the anchor. Only
+after commit does the step's session receipt remember the prior range; the
+persisted detached marker identifies that step and direction. The inverse step
+restores the receipt's range, rebased through ProseMirror history mapping; redo
+detaches again. Publications created after an insertion can similarly recover
+on redo. Deleted publications are not resurrected. Receipts are not persisted;
+reopen starts a new Undo session and does not guess detached coordinates.
+
+`analyzePublicationRecovery(userId, sourceId?)` reads one consistent snapshot and
+reports candidates without writing. Exact original-string matches preserve
+whitespace, Unicode and line endings; unique/ambiguous/missing results remain
+reports, never automatic repairs. A later approved repair must reread revision
+and identity before writing anchors only. Titles and fuzzy prefix/suffix matches
+are not authoritative anchors. v5 → v6 leaves all historical anchors missing.
+
+`recoverExactPublicationAnchors(userId, confirmations)` is explicit and resolves
+only after one atomic commit. Each approved confirmation contains publicationId,
+sourceId, current sourceRevision, canonical range, `sourceFingerprintSha256`
+(SHA-256 of the parsed archiveSourceFingerprint(text, day)) and `publicationSha256`
+(SHA-256 of the publication record), both via `publicationRecoveryProofHash` and
+the existing lossless backup codec, so object key order does not affect proofs.
+Original content characters are not normalized. The hashes must come from the inspected
+report/backup, not silently from an unapproved fresh source.
+
+Recovery flushes live queues, rereads records, validates owner/day identity,
+revision, both hashes and the unique literal snapshot match. Inside the final
+transaction it rereads all records and rechecks fingerprints and exact ranges,
+then adds only anchors. Any stale proof, existing anchor, active attached exact
+duplicate or failure aborts the batch. Nested/overlapping ranges and independent
+channels are allowed. Unapproved/missing/ambiguous matches remain untouched;
+no detached placeholder is created for an unmatched legacy publication. There
+is no automatic startup recovery and no write to historical publication records,
+snapshots, texts, userDays or settings.
+
+### Explicit manual reattachment and archive controls
+
+`reattachPublicationAnchor(userId, publicationId, source)` accepts only an explicit
+selection from the current archive document. A missing legacy anchor or a
+persisted detached anchor may remain that way indefinitely: owner libraries keep
+showing its immutable publication, but the archive rail shows no detached marker.
+There is no automatic snapshot search or fallback to historical provenance.
+
+The archive selection picker lists only detached publications of that source.
+Choosing one shows its saved snapshot; only the separate confirmation attaches
+it to the selected current range. Cancel makes no writes. Literal equality to
+the old snapshot is not required for this deliberate user-selected association.
+The repository flushes live queues, canonicalizes and validates the selected
+range, then repeats owner/source/day/revision and source fingerprint checks in
+one atomic write transaction. It refuses an already attached publication or a
+same-channel active attached exact duplicate. Nested ranges and other channels
+remain independent. It writes only `publicationAnchors`, clearing any old
+`detachedBy` Undo receipt; snapshots and historical provenance are never updated.
+
+Clicking an attached rail marker toggles a transient ProseMirror decoration over
+its current live range, without editing the document or replacing native text
+selection. Search decorations remain independent. A stale revision or an unsaved
+document suppresses the highlight. The marker's `×` opens a confirmation with
+Cancel as the default action; confirming uses the existing owner-safe
+`deletePublication(userId, publicationId)` contract. Only that publication and
+anchor are removed (and an existing profile pin is cleared by that contract).
+Other channels, source content, formatting and semantic markup are untouched.
 
 ## Owner libraries (stage D)
 
@@ -171,8 +266,8 @@ each publication and displays the permitted name inline.
 Existing `settings.publicProfile:${userId}` stores `profileVisible`, plain `about`
 (up to 300 Unicode characters), and `links: [{ label, url }]`. Links accept HTTPS
 without credentials. Settings replace the former unsaved social/resource mocks
-with this persisted public-profile editor. Schema remains v5, backup format v2;
-full settings records participate in the existing restore/reopen/compare.
+with this persisted public-profile editor. Public settings themselves need no
+additional schema changes; full settings records participate in restore/reopen/compare.
 
 Author information renders in the left sidebar, outside the unchanged central
 reading frame. Owner Publications → Profile provides `Закрепить в профиле` /

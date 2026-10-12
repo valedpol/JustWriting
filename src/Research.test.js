@@ -12,6 +12,7 @@ const calendarStyle = document.createElement('style')
 calendarStyle.textContent = readFileSync(new URL('./components/ArchiveCalendar.css', import.meta.url), 'utf8') + readFileSync(new URL('./Research.css', import.meta.url), 'utf8')
 document.head.append(calendarStyle)
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+globalThis.ResizeObserver = class { observe() {} disconnect() {} }
 // Full page rendering must not touch any IndexedDB, including the working DB.
 Object.defineProperty(globalThis, 'indexedDB', { configurable: true, get() { throw new Error('IndexedDB forbidden in Research render test') } })
 const { createRoot } = await import('react-dom/client')
@@ -20,6 +21,9 @@ const server = await createServer({ server: { middlewareMode: true, hmr: false, 
   plugins: [{ name: 'research-test-repository', enforce: 'pre', transform(code, id) {
     if (id.endsWith('/src/storage/researchRepository.js')) return 'export const loadResearch = userId => globalThis.__researchRenderLoad(userId)'
     if (id.endsWith('/src/storage/publicationRepository.js')) return 'export const listOwnPublications = async () => []'
+    if (id.endsWith('/src/hooks/useTodayText.js')) return `export const useTodayText = () => ({ userId: 'u', text: '', ready: false, status: 'saved',
+      localProfile: { displayName: 'JW user' }, flush: async () => {}, endWriting() {}, dayEndsAt: null, graceUntil: null })`
+    if (id.endsWith('/src/components/WritingEditor.jsx')) return 'export default function WritingEditor() { return null }'
   } }] })
 globalThis.__researchRenderLoad = userId => loadSnapshot(userId)
 const { default: Research } = await server.ssrLoadModule('/src/Research.jsx')
@@ -82,4 +86,42 @@ test('full Research page renders after asynchronous loading, with word caption, 
       await act(async () => root.unmount()); container.remove()
     }
   }
+})
+
+test('Research navigation opens only the three plain meanings lines and returns to the retained statistics period', async () => {
+  dom.window.localStorage.clear()
+  const dayKey = new Date().toISOString().slice(0, 10)
+  loadSnapshot = async () => ({ profile: { userId: 'u', timeZone: 'UTC', dayStartMinutes: 0 },
+    days: [{ userId: 'u', userDayId: 'day', dayKey }],
+    texts: [{ userId: 'u', userDayId: 'day', content: 'Один два три' }], samples: [] })
+  const { default: App } = await server.ssrLoadModule('/src/App.jsx')
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  const click = async text => {
+    const button = [...container.querySelectorAll('nav button')].find(node => node.textContent.trim() === text)
+    assert.ok(button); assert.equal(button.disabled, false)
+    await act(async () => button.click())
+  }
+  try {
+    await act(async () => root.render(createElement(App)))
+    await click('Исследования')
+    await act(async () => container.querySelector('[aria-label="Годы"] button').click())
+    const heading = container.querySelector('.research-day h1').textContent
+    await click('Смыслы')
+    assert.equal(container.querySelector('nav [aria-current=page]').textContent.trim(), 'Смыслы')
+    const meanings = container.querySelector('.editor-column .research-meanings')
+    assert.ok(meanings)
+    assert.deepEqual([...meanings.children].map(node => [node.tagName, node.textContent]), [
+      ['P', 'Смыслы появятся, когда накопится опыт.'],
+      ['P', 'Смыслы, не сомневайтесь, будут найдены.'], ['P', '...'],
+    ])
+    assert.ok(!container.querySelector('.research-time, .research-statistics, .research-chart'))
+    await click('Статистика')
+    assert.equal(container.querySelector('.research-day h1').textContent, heading)
+    assert.equal(container.querySelector('nav [aria-current=page]').textContent.trim(), 'Статистика')
+    await click('Смыслы')
+    await click('←')
+    assert.equal(container.querySelector('nav [aria-current=page]').textContent.trim(), 'Текст сегодня')
+    assert.ok(!container.querySelector('.research-content'))
+  } finally { await act(async () => root.unmount()); container.remove() }
 })

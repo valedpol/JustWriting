@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { EditorView } from '@tiptap/pm/view'
 import { AllSelection, Selection, TextSelection } from '@tiptap/pm/state'
@@ -14,7 +14,11 @@ import { listTexts } from '../storage/textRepository.js'
 import { semanticSuggestions } from '../editor/semanticSuggestions.js'
 import SemanticRail from './SemanticRail.jsx'
 import SemanticPicker, { SemanticCategories } from './SemanticPicker.jsx'
+import DaySearch from './DaySearch.jsx'
+import { currentDaySearch } from '../editor/currentDaySearch.js'
 import { searchDecorations } from '../editor/searchDecorations.js'
+import { publicationDecorations } from '../editor/publicationDecorations.js'
+import { attachedLiveRange } from '../publications/liveAnchors.js'
 import { stickySelectionPanelTop } from '../editor/selectionPanelGeometry.js'
 import { useArchivePublications } from '../hooks/useArchivePublications.js'
 import { canonicalArchiveRange } from '../publications/archiveSource.js'
@@ -24,8 +28,33 @@ import './WritingEditor.css'
 const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   const { controller, active, writing, ready, metadataHost, readonlyContent = false, scrollElement } = props
   const publications = useArchivePublications(controller, readonlyContent && active)
+  const [highlightedPublicationId, setHighlightedPublicationId] = useState(null)
   const latest = useRef(props)
   useLayoutEffect(() => { latest.current = props })
+  const publicationDisplay = useRef({ records: [], highlightedPublicationId: null })
+  useLayoutEffect(() => { publicationDisplay.current = { records: publications.records, highlightedPublicationId } })
+  const [tick, setTick] = useState(0)
+  const dayOpen = Boolean(props.quickSearchOpen && active && !readonlyContent)
+  const dayId = controller?.snapshot.context.dayKey
+  const dayState = controller?.state
+  const [daySearchElement, setDaySearchElement] = useState(null)
+  const [daySearch, setDaySearch] = useState({ open: dayOpen, dayId, query: '', activeId: null, navigationRevision: 0 })
+  // A search session ends on close or when the open writing day changes.
+  if (daySearch.open !== dayOpen || daySearch.dayId !== dayId) setDaySearch({ open: dayOpen, dayId, query: '', activeId: null, navigationRevision: 0 })
+  const setDayQuery = query => setDaySearch(previous => ({ ...previous, query, activeId: null }))
+  const setDayActiveId = activeId => setDaySearch(previous => ({ ...previous, activeId, navigationRevision: previous.navigationRevision + 1 }))
+  const dayOccurrences = useMemo(() => dayOpen && dayState ? currentDaySearch(dayState, daySearch.query, dayId) : [], [dayOpen, dayState, daySearch.query, dayId])
+  const effectiveDayId = dayOccurrences.some(item => item.id === daySearch.activeId) ? daySearch.activeId : dayOccurrences[0]?.id ?? null
+  const searchOccurrences = dayOpen ? dayOccurrences : props.searchOccurrences
+  const activeSearchId = dayOpen ? effectiveDayId : props.activeSearchId
+  const searchDisplay = useRef({ searchOccurrences, activeSearchId })
+  useLayoutEffect(() => { searchDisplay.current = { searchOccurrences, activeSearchId } }, [searchOccurrences, activeSearchId])
+  const editorDecorations = useCallback(state => {
+    const search = searchDecorations(state.doc, searchDisplay.current.searchOccurrences, searchDisplay.current.activeSearchId)
+    const display = publicationDisplay.current
+    const highlights = latest.current.readonlyContent ? publicationDecorations(state.doc, controller?.snapshot.record, display.records, display.highlightedPublicationId).find() : []
+    return search.add(state.doc, highlights)
+  }, [controller])
   const host = useRef(null)
   const viewRef = useRef(null)
   const [runtime, setRuntime] = useState(null)
@@ -34,7 +63,6 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   const panelRef = useRef(null)
   const [panel, setPanelState] = useState(null)
   const [records, setRecords] = useState([])
-  const [tick, setTick] = useState(0)
   const [position, setPosition] = useState(null)
   const [message, setMessage] = useState('')
   const [focused, setFocused] = useState(false)
@@ -104,7 +132,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       state: controller.state,
       editable: () => !latest.current.readonlyContent && latest.current.ready && latest.current.active && latest.current.writing && !panelRef.current?.category,
       attributes: { role: 'textbox', 'aria-label': 'Текстовый редактор', 'aria-multiline': 'true', spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off', 'data-placeholder': 'Пиши просто. Просто пиши.', ...(readonlyContent ? { 'aria-readonly': 'true', tabindex: '0' } : {}) },
-      decorations: state => searchDecorations(state.doc, latest.current.searchOccurrences, latest.current.activeSearchId),
+      decorations: editorDecorations,
       transformPastedHTML: cleanPaste,
       dispatchTransaction(tr) {
         if (panelRef.current?.category) return
@@ -275,7 +303,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       view.dom.ownerDocument.removeEventListener('selectionchange', selectionChanged)
       view.destroy(); viewRef.current = null
     }
-  }, [controller, cancelPanel, finishIME, scheduleIME, refresh, report, setPanel, readonlyContent])
+  }, [controller, cancelPanel, finishIME, scheduleIME, refresh, report, setPanel, readonlyContent, editorDecorations])
 
   useLayoutEffect(() => {
     viewRef.current?.setProps({ editable: () => !readonlyContent && ready && active && writing && !panelRef.current?.category })
@@ -283,8 +311,8 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
 
   useLayoutEffect(() => {
     const view = viewRef.current
-    if (view && readonlyContent) view.setProps({ decorations: state => searchDecorations(state.doc, latest.current.searchOccurrences, latest.current.activeSearchId) })
-  }, [props.searchOccurrences, props.activeSearchId, readonlyContent])
+    if (view) view.setProps({ decorations: editorDecorations })
+  }, [searchOccurrences, activeSearchId, readonlyContent, publications.records, highlightedPublicationId, tick, editorDecorations])
 
   useEffect(() => {
     if (!panelOpen || !controller) return
@@ -398,6 +426,13 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
   }, [panelVisible, panel, position, tick, writing, readonlyContent, scrollElement])
   return <>
     <div className="writing-scroll"><div ref={host} className="writing-editor" onClick={event => event.stopPropagation()} /></div>
+    {dayOpen ? <DaySearch query={daySearch.query} onQuery={setDayQuery} onElement={setDaySearchElement}
+      occurrences={dayOccurrences} activeId={effectiveDayId} navigationRevision={daySearch.navigationRevision} onClose={props.onSearchClose} anchor={props.searchAnchor}
+      view={runtime?.view} scroller={runtime?.scroller} metadataHost={metadataHost}
+      onMove={direction => {
+        const index = dayOccurrences.findIndex(item => item.id === effectiveDayId)
+        if (dayOccurrences.length) setDayActiveId(dayOccurrences[(index + direction + dayOccurrences.length) % dayOccurrences.length].id)
+      }} /> : null}
     {message && active ? <p className="editor-message" role="alert">{message}<button onClick={() => setMessage('')}>Закрыть</button></p> : null}
     {panelVisible ? createPortal(<div ref={toolbarRef} className="editor-panel" data-writing-tools role="toolbar" aria-label="Разметка текста"
       style={{ left: position.x, top: position.y }} onClick={event => event.stopPropagation()}
@@ -414,13 +449,19 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       </div>
       {panel?.category === 'publication' ? <PublicationPicker source={panel.publicationSource} records={publications.records}
         loading={publications.loading} loadError={publications.error} canCreate={canChangePresentation && panel.base === state}
-        create={publications.create} close={() => cancelPanel(true)} /> : <SemanticPicker panel={panel} queryInput={queryInput} suggestions={suggestions} setPanel={setPanel}
+        create={publications.create} reattach={publications.reattach} close={() => cancelPanel(true)} /> : <SemanticPicker panel={panel} queryInput={queryInput} suggestions={suggestions} setPanel={setPanel}
         applyValue={applyValue} cancelPanel={cancelPanel} />}
     </div>, document.body) : null}
     <SemanticRail view={runtime?.view} controller={controller} active={active} writing={writing} ready={ready}
-      metadataHost={metadataHost} scrollElement={scrollElement ?? runtime?.scroller} tick={tick}
+      metadataHost={metadataHost} scrollElement={scrollElement ?? runtime?.scroller} tick={tick} obstruction={dayOpen ? daySearchElement : null}
       publications={readonlyContent ? publications.records : undefined}
-      searchOccurrences={props.searchOccurrences} activeSearchId={props.activeSearchId}
+      highlightedPublicationId={highlightedPublicationId} onHighlightPublication={publicationId => {
+        const publication = publications.records.find(record => record.publicationId === publicationId)
+        const range = publication && attachedLiveRange(publication, controller.snapshot.record?.revision)
+        if (!range) return
+        setHighlightedPublicationId(previous => previous === publicationId ? null : publicationId)
+      }} onRemovePublication={publications.remove}
+      searchOccurrences={searchOccurrences} activeSearchId={activeSearchId}
       onActivate={props.onActivate} report={report} allowChanges={!readonlyContent && canChangePresentation} allowRemoval={canChangePresentation} />
   </>
 })

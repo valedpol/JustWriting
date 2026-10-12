@@ -1,0 +1,19 @@
+.studio-local-children { display: flex; flex-direction: column; gap: var(--navigation-item-gap); padding-left: 18px; }
+.screen-interface .studio-local-menu .menu-item { margin-top: 0; }
+.screen-interface .studio-local-menu .studio-local-exit { margin-top: calc(var(--navigation-group-gap) - var(--navigation-item-gap)); }
+.app-shell.studio-page { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+.studio-page .topbar, .studio-page .bottom-bar { flex-shrink: 0; }
+.studio-page .main-layout { overflow: hidden; }
+.studio-page .editor-column { justify-content: flex-start; min-height: 0; min-width: 0; }
+.studio-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; padding: 28px 28px 20px; font: 400 20px/1.55 Georgia, 'Times New Roman', serif; color: #171717; overflow-wrap: anywhere; }
+.studio-content p { margin: 0; white-space: pre-line; }
+.studio-content p + p { margin-top: 0.7lh; }
+@media (max-width: 900px) {
+  .studio-content { padding-inline: 18px; }
+}
+
+.studio-content::-webkit-scrollbar { display: none; }
+@media (max-width: 900px) {
+  .studio-page .main-layout { grid-template-rows: auto minmax(0, 1fr); }
+  .studio-page .right-sidebar { display: none; }
+}

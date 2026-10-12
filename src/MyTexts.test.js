@@ -11,7 +11,7 @@ globalThis.ResizeObserver = class { observe() {} disconnect() {} }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 Object.defineProperty(globalThis, 'indexedDB', { configurable: true, get() { throw new Error('IndexedDB forbidden in calendar test') } })
 const style = document.createElement('style')
-style.textContent = readFileSync(new URL('./MyTexts.css', import.meta.url), 'utf8') + readFileSync(new URL('./components/ArchiveCalendar.css', import.meta.url), 'utf8')
+style.textContent = readFileSync(new URL('./App.css', import.meta.url), 'utf8') + readFileSync(new URL('./MyTexts.css', import.meta.url), 'utf8') + readFileSync(new URL('./components/ArchiveCalendar.css', import.meta.url), 'utf8')
 document.head.append(style)
 const { createRoot } = await import('react-dom/client')
 const records = [{ textId: 'a', dayKey: '2025-09-26', content: 'Первый' },
@@ -215,4 +215,79 @@ test('publication navigation returns channel → archive → today and preserves
     assert.equal(exits, 0)
     await click(find('←')); assert.equal(exits, 1)
   } finally { await act(async () => root.unmount()); container.remove(); host.remove() }
+})
+
+test('semantic lists preserve archive period/expanded state/scroll on back; failed flush keeps the archive visible', async () => {
+  globalThis.__archiveRecords = records
+  const container = document.createElement('div'), host = document.createElement('aside')
+  document.body.append(container, host)
+  const root = createRoot(container)
+  const control = text => [...container.querySelectorAll('nav button')].find(node => node.textContent === text)
+  const click = async node => act(async () => node.click())
+  try {
+    await act(async () => root.render(createElement(MyTexts, { userId: 'u', flush: async () => {}, onTotalWords() {}, metadataHost: host })))
+    await click(container.querySelector('[aria-controls=archive-calendar]'))
+    await click([...container.querySelectorAll('[aria-label=Годы] button')].find(node => node.textContent === '2026'))
+    await click(container.querySelector('[data-text-id=b] button'))
+    const area = container.querySelector('.archive-scroll')
+    area.scrollTop = 234
+    for (const [name, empty] of [['Названия', 'Названий пока нет.'], ['Теги', 'Тегов пока нет.']]) {
+      assert.equal(control(name).disabled, false)
+      await click(control(name))
+      assert.equal(container.querySelector('.my-texts').hidden, false)
+      assert.ok(container.querySelector('.archive-semantic-selector').textContent.includes(empty))
+      assert.equal(container.querySelectorAll('[data-text-id]').length, 0)
+      const heading = container.querySelector('.archive-semantic-selector-heading')
+      const list = container.querySelector('.archive-semantic-list-scroll')
+      assert.equal(heading.firstElementChild.textContent, '←')
+      assert.equal(heading.lastElementChild.textContent, name)
+      assert.equal(list.contains(heading), false)
+      assert.equal(getComputedStyle(list).overflowY, 'auto')
+      assert.equal(parseFloat(getComputedStyle(list).minHeight), 0)
+      assert.equal(getComputedStyle(heading).flexShrink, '0')
+      assert.equal(host.querySelector('.archive-actions'), null)
+      await click(control('←'))
+      assert.equal(container.querySelector('.archive-semantic-selector'), null)
+      assert.equal(container.querySelector('.my-texts').hidden, false)
+      assert.ok(container.querySelector('[data-text-id=b] .test-open-editor'))
+      assert.ok(container.querySelector('[aria-label="Снять выбранный период"]'))
+      assert.equal(area.scrollTop, 234)
+    }
+    flushEditor = async () => { throw new Error('Cannot flush') }
+    await click(control('Названия'))
+    assert.equal(container.querySelector('.archive-semantic-selector'), null)
+    assert.equal(container.querySelector('.my-texts').hidden, false)
+    assert.ok(container.querySelector('[role=alert]'))
+  } finally { flushEditor = async () => {}; await act(async () => root.unmount()); container.remove(); host.remove() }
+})
+
+
+test('long left selector keeps return header outside its bounded scroll list and above the fixed footer', async () => {
+  const { default: Selector } = await server.ssrLoadModule('/src/components/ArchiveSemanticSelector.jsx')
+  const shell = document.createElement('div')
+  shell.className = 'app-shell screen-interface archive-page'
+  shell.innerHTML = '<main class="main-layout"><aside class="left-sidebar"><div class="archive-navigation-slot"></div></aside><div class="editor-column"></div><aside class="right-sidebar"></aside></main><footer class="bottom-bar">Написано 100 слов</footer>'
+  document.body.append(shell)
+  const host = shell.querySelector('.archive-navigation-slot'), root = createRoot(host)
+  const titles = Array.from({ length: 80 }, (_, i) => ({ id: String(i), markupId: String(i), value: `Название ${i}`, dayKey: '2026-10-01' }))
+  let back = 0
+  try {
+    await act(async () => root.render(createElement(Selector, { page: 'title', index: { titles, tags: [], errors: [] }, selected: '0', onSelect() {}, onBack() { back++ } })))
+    const nav = host.querySelector('nav'), heading = nav.querySelector('.archive-semantic-selector-heading'), list = nav.querySelector('.archive-semantic-list-scroll')
+    assert.equal(list.querySelectorAll('li').length, 80)
+    assert.equal(getComputedStyle(list).overflowY, 'auto')
+    assert.equal(parseFloat(getComputedStyle(list).minHeight), 0)
+    assert.equal(getComputedStyle(nav).display, 'flex')
+    assert.equal(getComputedStyle(nav).flexDirection, 'column')
+    assert.equal(getComputedStyle(heading).flexShrink, '0')
+    assert.equal(getComputedStyle(shell.querySelector('.left-sidebar')).overflow, 'hidden')
+    assert.equal(parseFloat(getComputedStyle(host).minHeight), 0)
+    assert.equal(getComputedStyle(shell.querySelector('.bottom-bar')).flexShrink, '0')
+    assert.ok(heading.compareDocumentPosition(list) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING)
+    assert.equal(list.contains(heading), false)
+    list.scrollTop = 900
+    await act(async () => heading.querySelector('button').click())
+    assert.equal(back, 1, 'return remains separate from the scrolling list')
+    assert.equal(shell.querySelector('.bottom-bar').textContent, 'Написано 100 слов')
+  } finally { await act(async () => root.unmount()); shell.remove() }
 })

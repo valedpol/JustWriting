@@ -48,4 +48,11 @@
 .settings-content input[type="checkbox"] { width: auto; justify-self: start; accent-color: #777; }
 
 .public-links-actions { display: flex; gap: 24px; }
+.settings-resource.public-link-saved { gap: 12px; align-items: center; margin-bottom: 8px; }
+.public-link-saved label { gap: 0; }
+.settings-content .public-link-saved input { padding: 3px 0; }
+.settings-content .public-link-delete { min-height: 32px; padding: 6px 8px; }
+.public-link-presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .settings-content textarea { resize: vertical; }
+.settings-about-field { min-width: 0; }
+.settings-about-count { display: block; margin-top: 8px; }

@@ -34,5 +34,6 @@ export async function verifyCheckpointFromDisk(file, receipt, { coordinator = ma
   await coordinator.assertReady(receipt.maintenanceToken)
   return { ...metadata(file, backup, sha256), maintenanceToken: receipt.maintenanceToken,
     checkpointId: receipt.checkpointId, verifiedFromDisk: true, restoreVerified: restored.verified,
+    migrationVerified: restored.migrationVerified, migratedDbVersion: restored.migratedDatabaseVersion,
     isolatedRestoreName: name, isolatedRestoreDeleted: restored.deleted }
 }

@@ -103,7 +103,11 @@ test('exact duplicate (including AllSelection/mouse equivalence) rejects atomica
 test('republish after delete gets new ID/date; duplicate does not depend on source revision', async t => {
   const f = await fixture(); t.after(f.close)
   const [first] = await create(f)
-  await f.runTransaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put({ ...f.texts[0], revision: 4 }))
+  await f.runTransaction(['texts', 'publicationAnchors'], 'readwrite', tx => {
+    tx.objectStore('texts').put({ ...f.texts[0], revision: 4 })
+    const read = tx.objectStore('publicationAnchors').get(first.publicationId)
+    read.onsuccess = () => tx.objectStore('publicationAnchors').put({ ...read.result, sourceRevision: 4 })
+  })
   await assert.rejects(f.repo.createPublications(users[0], { source: { ...f.source(), sourceRevision: 4 }, channels: ['profile'] }), { name: 'ConstraintError' })
   await f.repo.deletePublication(users[0], first.publicationId)
   const nextRepo = createPublicationRepository({ runTransaction: f.runTransaction, flush: async () => {}, now: () => 101 })
@@ -201,6 +205,13 @@ test('source edits and author/settings changes never change existing snapshots; 
     document: legacyToDocument('changed'), revision: 4, semanticMarkup: [] }))
   assert.deepEqual(await f.repo.listOwnPublications(users[0], 'profile'), [p])
   assert.deepEqual(await f.repo.listOwnPublications(users[0], 'feed'), [feed])
+  await assert.rejects(f.repo.createPublications(users[0], { source: { ...f.source(), sourceRevision: 4, range: { from: 1, to: 4 } }, channels: ['feed'] }), /anchor revision/)
+  await f.runTransaction(['publicationAnchors'], 'readwrite', tx => {
+    for (const record of [p, feed]) {
+      const read = tx.objectStore('publicationAnchors').get(record.publicationId)
+      read.onsuccess = () => tx.objectStore('publicationAnchors').put({ ...read.result, status: 'detached', range: null, sourceRevision: 4 })
+    }
+  })
   const [next] = await f.repo.createPublications(users[0], { source: { ...f.source(), sourceRevision: 4, range: { from: 1, to: 4 } }, channels: ['feed'] })
   assert.equal(next.authorVisibility, 'hidden')
 })
@@ -240,7 +251,7 @@ for (const patch of [{ revision: 4 }, { content: 'tampered' }, { semanticMarkup:
   })
 }
 
-test('actual repository-created publications survive backup v2 UUID restore/reopen/compare', async t => {
+test('actual repository-created publications survive backup v3 UUID restore/reopen/compare', async t => {
   const f = await fixture(); t.after(f.close)
   await create(f, ['profile', 'feed', 'internet'])
   const before = await f.all()

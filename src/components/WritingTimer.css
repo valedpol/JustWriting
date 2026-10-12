@@ -1,0 +1,7 @@
+.writing-session-countdown { position: fixed; z-index: 15; transform: translateX(-50%); color: #4b4b4b; font-size: .85rem; font-weight: 400; line-height: 1.5; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.writing-timer-result { position: fixed; z-index: 15; box-sizing: border-box; border: 1px solid #d9d9d9; padding: 20px 12px 12px; background: #fff; color: #555; font-size: 16px; font-weight: 400; line-height: 1.5; }
+.writing-timer-result p { margin: 0; text-align: center; }
+.writing-timer-result button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.writing-timer-ok { display: block; margin: 8px auto 0; padding: 4px 12px; }
+.writing-timer-setup .archive-search-form { width: calc(16ch + 12px); max-width: 100%; margin-left: auto; }
+.writing-timer-setup .archive-search-form input { padding-inline: 6px; }

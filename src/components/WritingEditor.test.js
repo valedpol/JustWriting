@@ -29,6 +29,146 @@ const { TextSelection } = await import('@tiptap/pm/state')
 const { undo, redo } = await import('@tiptap/pm/history')
 after(async () => { await server.close(); dom.window.close() })
 
+test('left title/tag selectors show standard collapsed archive cards, reread exact readonly ranges and never write stores', async () => {
+  const { default: MyTexts } = await server.ssrLoadModule('/src/MyTexts.jsx')
+  const { transaction } = await server.ssrLoadModule('/src/storage/database.js')
+  const userId = crypto.randomUUID()
+  const semantic = (id, kind, value, from, to) => ({ id, valueId: `value-${value}`, kind, value, source: 'selection',
+    direction: kind === 'title' ? 'forward' : 'backward', anchor: kind === 'title' ? from : to, range: { from, to } })
+  const content = 'Вступление\r\n' + 'Средняя строка\r\n'.repeat(12) + 'Конец дня и нужный фрагмент'
+  const end = content.replace(/\r\n/g, '\n').indexOf('Конец дня') + 1
+  const rows = [
+    { dayKey: '2025-09-25', content, semanticMarkup: [semantic('z', 'title', 'Ясень', 1, 5), semantic('a', 'title', 'Ворона', end, end + 9), semantic('tag-a', 'tag', 'JW', end + 12, end + 18), semantic('tag-b', 'tag', 'JW', 1, 5)] },
+    { dayKey: '2026-10-01', content: 'Азбука и нужный текст', semanticMarkup: [semantic('b', 'title', 'Азбука', 1, 7), semantic('tag-c', 'tag', 'JW', 11, 17)] },
+    { dayKey: '2026-10-02', content: 'Другой фрагмент', semanticMarkup: [semantic('c', 'title', 'Ворона', 1, 7), semantic('tag-d', 'tag', 'Редкий', 8, 15)] },
+  ].map(row => ({ ...row, textId: crypto.randomUUID(), userId, revision: 1 }))
+  await transaction(['texts'], 'readwrite', tx => rows.forEach(row => tx.objectStore('texts').add(row)))
+  const snapshot = () => transaction(['settings', 'texts', 'userDays', 'wordCountSamples', 'publications', 'publicationAnchors'], 'readonly', (tx, done) => {
+    const data = {}; done(data)
+    for (const name of ['settings', 'texts', 'userDays', 'wordCountSamples', 'publications', 'publicationAnchors']) {
+      const read = tx.objectStore(name).getAll(); read.onsuccess = () => { data[name] = read.result }
+    }
+  })
+  const before = await snapshot()
+  const container = document.createElement('div'), sidebar = document.createElement('aside'), navigation = document.createElement('aside')
+  document.body.append(container, sidebar, navigation)
+  const root = createRoot(container)
+  const nav = text => [...navigation.querySelectorAll('button')].find(node => node.textContent === text)
+  const settle = async predicate => {
+    for (let i = 0; i < 100 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)))
+    assert.ok(predicate(), `${navigation.textContent}; ${container.textContent}`)
+  }
+  const originalRects = dom.window.Range.prototype.getClientRects
+  dom.window.Range.prototype.getClientRects = function () {
+    const top = this.startContainer.textContent?.includes('Конец дня') ? 800 : 200
+    return [{ ...rect, top, bottom: top + 20 }]
+  }
+  try {
+    await act(async () => root.render(createElement(MyTexts, { userId, flush: async () => {}, onTotalWords() {}, metadataHost: sidebar, navigationHost: navigation })))
+    await settle(() => container.querySelectorAll('[data-text-id]').length === 3)
+    const area = container.querySelector('.archive-scroll')
+    Object.defineProperty(area, 'clientHeight', { value: 600 })
+    await click(container.querySelector('[aria-controls=archive-calendar]'))
+    await click([...container.querySelectorAll('[aria-label=Годы] button')].find(node => node.textContent === '2026'))
+    await settle(() => !nav('Поиск').disabled)
+    await click(nav('Поиск'))
+    await act(async () => {
+      const input = navigation.querySelector('input')
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, 'Азбука')
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    })
+    await act(async () => navigation.querySelector('form').requestSubmit())
+    await settle(() => !navigation.querySelector('[aria-label="Найти"]').disabled && container.querySelectorAll('[data-text-id]').length === 1)
+    await click(nav('←'))
+    await settle(() => !nav('Названия').disabled)
+    await click(nav('Названия'))
+    const items = () => [...navigation.querySelectorAll('[data-semantic-item]')]
+    const ids = () => [...container.querySelectorAll('[data-text-id]')].map(node => node.dataset.textId)
+    const entry = id => container.querySelector(`[data-text-id="${id}"] .archive-preview-button`)
+    const choose = id => click(navigation.querySelector(`[data-semantic-item="${id}"]`))
+    await settle(() => items().length === 4 && !items()[0].disabled)
+    assert.deepEqual(items().map(node => node.textContent), ['Азбука', 'Ворона', 'Ворона', 'Ясень'])
+    assert.deepEqual(items().filter(node => node.textContent === 'Ворона').map(node => node.title), ['Написано 02.10.2026', 'Написано 25.09.2025'])
+    assert.equal(navigation.querySelector('time'), null, 'dates do not consume list width')
+    assert.equal(items()[0].getAttribute('aria-current'), 'true', 'first alphabetic title is selected automatically')
+    assert.deepEqual(ids(), [rows[1].textId])
+    assert.equal(container.querySelector('.saved-text'), null, 'initial matching card is collapsed')
+    const heading = navigation.querySelector('.archive-semantic-selector-heading')
+    assert.equal(heading.firstElementChild.textContent, '←')
+    assert.equal(heading.lastElementChild.textContent, 'Названия')
+    assert.equal(navigation.querySelector('.archive-semantic-list-scroll').contains(heading), false)
+    assert.equal(navigation.querySelectorAll('button').length, 5, 'one header back button, no bottom back item')
+    await choose('a')
+    await settle(() => !items()[0].disabled && ids().length === 2)
+    assert.deepEqual(ids(), [rows[0].textId, rows[2].textId], 'same title matches several days in ordinary archive order')
+    assert.equal(container.querySelector('.saved-text'), null)
+    await click(entry(rows[0].textId))
+    await settle(() => window.getSelection().toString() === 'Конец дня')
+    assert.equal(container.querySelector('[aria-label="Снять выбранный период"]'), null)
+    assert.equal(container.querySelector('.archive-search-criterion'), null)
+    assert.ok(document.activeElement.closest(`[data-text-id="${rows[0].textId}"]`))
+    assert.equal(document.activeElement.getAttribute('contenteditable'), 'false')
+    assert.ok(area.scrollTop > 0, 'standard archive expansion locates the matching late range')
+    await click(container.querySelector('.archive-record-info'))
+    assert.equal(container.querySelector('.saved-text'), null, 'standard archive control collapses the card again')
+    await click(nav('←'))
+    await settle(() => nav('Теги') && !nav('Теги').disabled)
+    assert.ok(container.querySelector('[aria-label="Снять выбранный период"]'), 'back restores the previous period')
+    assert.ok(container.querySelector('.archive-search-criterion'), 'back restores the previous query')
+    await click(nav('Теги'))
+    await settle(() => items().length === 2 && !items()[0].disabled)
+    assert.deepEqual(items().map(node => node.textContent), ['JW3', 'Редкий1'])
+    assert.equal(items()[0].getAttribute('aria-current'), 'true', 'most frequent tag is selected automatically')
+    assert.deepEqual(ids(), [rows[0].textId, rows[1].textId], 'multiple assignments in one day produce one standard card')
+    await choose('Редкий')
+    await settle(() => !items()[0].disabled && ids().length === 1)
+    assert.deepEqual(ids(), [rows[2].textId])
+    await click(entry(rows[2].textId))
+    await settle(() => window.getSelection().toString() === 'фрагмен')
+    assert.equal(document.activeElement.getAttribute('contenteditable'), 'false')
+    await choose('JW')
+    await settle(() => !items()[0].disabled && ids().length === 2)
+    assert.equal(container.querySelector('.saved-text'), null, 'another selector choice resets cards to collapsed')
+    assert.deepEqual(await snapshot(), before, 'navigation writes no text, metadata, publication, anchor, setting or sample')
+    await click(nav('←'))
+    await settle(() => nav('Названия') && !nav('Названия').disabled)
+    await click(nav('Названия'))
+    await settle(() => items().length === 4 && !items()[0].disabled)
+    await choose('a')
+    await settle(() => !items()[0].disabled && ids().length === 2)
+    // Expansion rereads the current source before opening the standard editor.
+    const updated = { ...rows[0], revision: 2, content: 'Новый нужный фрагмент', semanticMarkup: [semantic('a', 'title', 'Ворона', 7, 13)] }
+    await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put(updated))
+    const changed = await snapshot()
+    await click(entry(rows[0].textId))
+    await settle(() => window.getSelection().toString() === 'нужный')
+    assert.equal(document.activeElement.textContent, updated.content)
+    assert.equal(document.activeElement.getAttribute('contenteditable'), 'false')
+    assert.deepEqual(await snapshot(), changed)
+    await click(container.querySelector('.archive-record-info'))
+    await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put({ ...updated, revision: 3, semanticMarkup: [] }))
+    const removed = await snapshot()
+    await click(entry(rows[0].textId))
+    await settle(() => container.querySelector('[role=alert]'))
+    assert.equal(container.querySelector('.saved-text'), null, 'removed assignments never navigate to a stale range')
+    assert.deepEqual(ids(), [rows[1].textId], 'a removed choice falls back to the first available title')
+    assert.deepEqual(await snapshot(), removed)
+    await act(async () => root.render(null))
+    await act(async () => root.render(createElement(MyTexts, { userId, flush: async () => {}, onTotalWords() {}, metadataHost: sidebar, navigationHost: navigation })))
+    await settle(() => nav('Названия') && !nav('Названия').disabled)
+    await click(nav('Названия'))
+    await settle(() => items().length === 2 && !items()[0].disabled)
+    assert.deepEqual(items().map(node => node.textContent), ['Азбука', 'Ворона'])
+    assert.equal(items()[0].getAttribute('aria-current'), 'true')
+    assert.deepEqual(ids(), [rows[1].textId])
+    assert.equal(container.querySelector('.saved-text'), null)
+    assert.deepEqual(await snapshot(), removed)
+  } finally {
+    dom.window.Range.prototype.getClientRects = originalRects
+    await act(async () => root.unmount()); container.remove(); sidebar.remove(); navigation.remove()
+  }
+})
+
 test('readonly archive removes individual assignments and the last one persistently without changing historical fields', async () => {
   const { default: MyTexts } = await server.ssrLoadModule('/src/MyTexts.jsx')
   const { loadText } = await server.ssrLoadModule('/src/storage/textRepository.js')
@@ -680,6 +820,19 @@ test('main JW screen enters writing, keeps the editor across standard/wide and o
     await settle(() => container.querySelector('.ProseMirror'))
     const editor = container.querySelector('.ProseMirror')
     assert.equal(editor.getAttribute('contenteditable'), 'false')
+    await click(container.querySelector('.meta-countdown'))
+    await settle(() => container.querySelector('.screen-writing-standard'))
+    await click(container.querySelector('button[aria-label="Таймер письма"]'))
+    await settle(() => document.querySelector('[aria-label="Количество минут"]'))
+    await act(async () => {
+      const input = document.querySelector('[aria-label="Количество минут"]')
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, '1')
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    })
+    await act(async () => document.querySelector('#writing-timer-setup').requestSubmit())
+    await settle(() => document.activeElement === editor && document.querySelector('[role=timer]'))
+    assert.equal(window.getSelection().anchorOffset, 0, 'empty-day timer focuses the first text position')
+    await click(container.querySelector('.brand-block'))
     await act(async () => {
       editor.focus()
       editor.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'А', bubbles: true, cancelable: true }))
@@ -691,6 +844,19 @@ test('main JW screen enters writing, keeps the editor across standard/wide and o
       editor.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true, cancelable: true }))
     })
     await settle(() => editor.querySelector('strong'))
+    const magnifier = () => container.querySelector('[aria-label="Поиск по текущему дню"]')
+    await click(magnifier())
+    await settle(() => document.querySelector('[aria-label="Найти в текущем дне"]'))
+    await act(async () => {
+      const search = document.querySelector('[aria-label="Найти в текущем дне"]')
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(search, 'а')
+      search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    })
+    assert.equal(editor.querySelector('.archive-search-match').textContent, 'А')
+    assert.equal(magnifier().getAttribute('aria-expanded'), 'true')
+    await click(magnifier())
+    assert.equal(document.querySelector('.day-search'), null)
+    assert.equal(editor.querySelector('.archive-search-match'), null)
     await click(container.querySelector('button[aria-label="Перейти в широкий режим"]'))
     await settle(() => container.querySelector('.screen-writing-wide'))
     assert.equal(container.querySelector('.ProseMirror'), editor)
@@ -721,6 +887,74 @@ test('main JW screen enters writing, keeps the editor across standard/wide and o
     assert.ok(container.querySelector('nav[aria-label="Главное меню"]'))
     assert.equal(container.querySelector('.ProseMirror'), editor)
     assert.equal(editor.getAttribute('contenteditable'), 'false')
+  } finally { await act(async () => root.unmount()); container.remove() }
+})
+
+test('timer/search settings are mutually exclusive; starting from wide mode focuses the existing text end without changing source', async () => {
+  const { default: App } = await server.ssrLoadModule('/src/App.jsx')
+  const { transaction } = await server.ssrLoadModule('/src/storage/database.js')
+  const stores = ['settings', 'texts', 'userDays', 'wordCountSamples', 'publications', 'publicationAnchors']
+  const snapshot = () => transaction(stores, 'readonly', (tx, done) => {
+    const result = {}; done(result)
+    for (const name of stores) {
+      const read = tx.objectStore(name).getAll()
+      read.onsuccess = () => {
+        // Normal editor focus updates the clock-safety heartbeat independently
+        // of the tools. Compare all actual settings/content/session fields.
+        result[name] = name === 'settings' ? read.result.map(row => {
+          if (row.key !== 'localProfile') return row
+          const copy = { ...row }; delete copy.lastObservedAt; return copy
+        }) : read.result
+      }
+    }
+  })
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  const settle = async predicate => {
+    for (let i = 0; i < 80 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)))
+    assert.ok(predicate(), container.textContent)
+  }
+  const fill = async (selector, value) => act(async () => {
+    const input = document.querySelector(selector)
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, value)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  })
+  try {
+    await act(async () => root.render(createElement(App)))
+    await settle(() => container.querySelector('.ProseMirror') && container.textContent.includes('Сохранено'))
+    const editor = container.querySelector('.ProseMirror'), content = editor.innerHTML
+    assert.ok(editor.textContent.length > 0)
+    await click(container.querySelector('.meta-countdown'))
+    await settle(() => container.querySelector('.screen-writing-standard'))
+    const before = await snapshot()
+    const search = () => container.querySelector('[aria-label="Поиск по текущему дню"]')
+    const timer = () => container.querySelector('button[aria-label="Таймер письма"]')
+    await click(search())
+    await fill('[aria-label="Найти в текущем дне"]', 'а')
+    assert.ok(editor.querySelector('.archive-search-match'))
+    await click(timer())
+    assert.equal(document.querySelector('#quick-day-search'), null)
+    assert.equal(editor.querySelector('.archive-search-match'), null)
+    await fill('[aria-label="Количество минут"]', '25')
+    await click(search())
+    assert.equal(document.querySelector('#writing-timer-setup'), null)
+    assert.equal(document.querySelector('[aria-label="Найти в текущем дне"]').value, '')
+    await click(timer())
+    assert.equal(document.querySelector('[aria-label="Количество минут"]').value, '')
+    await click(timer())
+    assert.equal(document.querySelector('#writing-timer-setup'), null)
+    await click(container.querySelector('[aria-label="Перейти в широкий режим"]'))
+    await click(timer())
+    await fill('[aria-label="Количество минут"]', '120')
+    await act(async () => document.querySelector('#writing-timer-setup').requestSubmit())
+    await settle(() => document.activeElement === editor && container.querySelector('.screen-writing-standard'))
+    assert.equal(document.querySelector('[role=timer]').textContent, '120:00')
+    assert.equal(document.querySelector('#writing-timer-setup'), null)
+    const selection = window.getSelection(), range = document.createRange()
+    range.selectNodeContents(editor); range.setEnd(selection.anchorNode, selection.anchorOffset)
+    assert.equal(range.toString(), editor.textContent, 'caret is at the end of the existing snapshot')
+    assert.equal(editor.innerHTML, content)
+    assert.deepEqual(await snapshot(), before, 'timer actions do not write any store or alter the daily goal')
   } finally { await act(async () => root.unmount()); container.remove() }
 })
 
@@ -1209,3 +1443,125 @@ for (const backward of [false, true]) {
     } finally { await f.close() }
   })
 }
+
+
+test('quick current-day search highlights literal text/title/tag matches, wraps both ways, keeps caret/focus and clears on toggle/Esc without storage writes', async () => {
+  const { transaction } = await server.ssrLoadModule('/src/storage/database.js')
+  const controller = await openWritingController({ profile: { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 } })
+  await controller.dispatch(controller.state.tr.insertText('Ёж один ёж. Фраза два.'))
+  for (const [id, kind, value, from, to] of [['title', 'title', 'ЁЖ название', 1, 3], ['tag', 'tag', 'ТОП ёж', 4, 8]]) {
+    await controller.dispatch(controller.state.tr.setSelection(TextSelection.create(controller.state.doc, from, to)))
+    await controller.dispatch(assignSelectionMarkup(controller.state, { id, kind, value, valueId: id }))
+  }
+  await controller.flush()
+  const stores = ['settings', 'texts', 'userDays', 'wordCountSamples', 'publications', 'publicationAnchors']
+  const snapshot = () => transaction(stores, 'readonly', (tx, done) => {
+    const values = {}; done(values)
+    for (const name of stores) { const read = tx.objectStore(name).getAll(); read.onsuccess = () => { values[name] = read.result } }
+  })
+  const before = await snapshot(), docBefore = controller.state.doc.toJSON(), selectionBefore = controller.state.selection
+  const markupBefore = getSemanticMarkup(controller.state)
+  const container = document.createElement('div'), sidebar = document.createElement('aside'), icon = document.createElement('button')
+  document.body.append(container, sidebar, icon)
+  const ref = createRef(), anchor = { current: icon }, root = createRoot(container)
+  const render = open => root.render(createElement(WritingEditor, { ref, controller, writing: true, active: true, ready: true, metadataHost: sidebar,
+    quickSearchOpen: open, searchAnchor: anchor, onSearchClose: () => render(false), onActivate() {} }))
+  const settle = async predicate => {
+    for (let i = 0; i < 80 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)))
+    assert.ok(predicate(), `search should settle: ${document.querySelector('.day-search')?.textContent}`)
+  }
+  const input = () => document.querySelector('[aria-label="Найти в текущем дне"]')
+  const query = async value => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input(), value)
+      input().dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    })
+    await act(async () => new Promise(resolve => setTimeout(resolve, 10)))
+  }
+  const active = () => [...container.querySelectorAll('.archive-search-match.is-current'), ...sidebar.querySelectorAll('.archive-search-match.is-current')]
+  const move = direction => click(document.querySelector(`[aria-label="${direction > 0 ? 'Следующее' : 'Предыдущее'} совпадение"]`))
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this === sidebar) return { ...rect, left: 800, right: 1000, width: 200, top: 100, bottom: 400, height: 300 }
+    if (this.classList.contains('day-search')) return { ...rect, top: 58, bottom: 150, height: 92 }
+    if (this === icon) return { ...rect, top: 20, bottom: 48 }
+    if (this.classList.contains('writing-scroll')) return { ...rect, top: 100, bottom: 400, height: 300 }
+    if (this.classList.contains('archive-search-match')) {
+      const scroller = container.querySelector('.writing-scroll')
+      const top = (sidebar.contains(this) ? 600 : 200) - scroller.scrollTop
+      return { ...rect, top, bottom: top + 20 }
+    }
+    return originalRect.call(this)
+  }
+  try {
+    await act(async () => render(true))
+    await settle(() => input() && document.activeElement === input())
+    const panel = document.querySelector('.day-search'), scroller = container.querySelector('.writing-scroll')
+    assert.equal(container.contains(panel), false, 'search controls stay outside the text layout')
+    assert.equal(panel.style.width, '130px')
+    assert.equal(panel.style.left, '835px')
+    assert.equal(panel.style.top, '58px')
+    assert.ok([...sidebar.querySelectorAll('.semantic-group')].every(group => parseFloat(group.style.top) >= 58), 'semantic labels remain visible below the search controls')
+    const view = ref.current.instance, originalCoords = view.coordsAtPos
+    view.coordsAtPos = position => ({ ...rect, top: position === 1 ? -100 : 180 })
+    await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+    assert.ok(parseFloat(sidebar.querySelector('.semantic-group').style.top) < 0, 'offscreen labels do not accumulate below search controls')
+    view.coordsAtPos = originalCoords
+    await act(async () => scroller.dispatchEvent(new dom.window.Event('scroll')))
+    await query('ФРАЗА два')
+    assert.equal(container.querySelectorAll('.archive-search-match').length, 1)
+    assert.equal(sidebar.querySelector('.archive-search-match'), null)
+    assert.equal(active()[0].textContent, 'Фраза два')
+    assert.ok(panel.textContent.includes('1 / 1'))
+    scroller.scrollTop = 300
+    await move(1); assert.ok(panel.textContent.includes('1 / 1'))
+    await act(async () => new Promise(resolve => setTimeout(resolve, 10)))
+    assert.ok(scroller.scrollTop < 300, 'navigation reveals even the only occurrence after manual scrolling')
+    await query('название')
+    assert.equal(container.querySelector('.archive-search-match'), null)
+    assert.equal(active()[0].closest('.semantic-value').dataset.kind, 'title')
+    assert.ok(scroller.scrollTop > 0, 'out-of-view semantic label is brought into view')
+    await query('ТОП')
+    assert.equal(container.querySelector('.archive-search-match'), null, 'tag match does not decorate its associated text')
+    assert.equal(active()[0].closest('.semantic-value').dataset.kind, 'tag')
+    await query('ЕЖ')
+    assert.equal(container.querySelectorAll('.archive-search-match').length, 2)
+    assert.equal(sidebar.querySelectorAll('.archive-search-match').length, 2)
+    assert.equal(active().length, 1)
+    assert.ok(panel.textContent.includes('1 / 4'))
+    const first = active()[0].dataset.searchOccurrence
+    await move(-1); assert.ok(panel.textContent.includes('4 / 4'))
+    assert.equal(active().length, 1)
+    await move(1); assert.equal(active()[0].dataset.searchOccurrence, first)
+    const visited = new Set([first])
+    for (let i = 0; i < 3; i++) { await move(1); visited.add(active()[0].dataset.searchOccurrence) }
+    assert.equal(visited.size, 4)
+    await move(1); assert.equal(active()[0].dataset.searchOccurrence, first)
+    assert.equal(document.activeElement, input())
+    assert.equal(ref.current.instance.hasFocus(), false)
+    assert.ok(controller.state.selection.eq(selectionBefore), 'search navigation never moves editor selection')
+    await query('невозможное совпадение')
+    assert.equal(panel.querySelector('.archive-search-paging span').textContent, '0')
+    assert.ok([...panel.querySelectorAll('button')].every(button => button.disabled))
+    assert.equal(panel.querySelector('[role=alert]'), null)
+    await query('еж')
+    await act(async () => render(false))
+    assert.equal(document.querySelector('.day-search'), null)
+    assert.equal(container.querySelector('.archive-search-match'), null)
+    assert.equal(sidebar.querySelector('.archive-search-match'), null)
+    await act(async () => render(true))
+    await settle(() => input() && document.activeElement === input())
+    assert.equal(input().value, '')
+    await query('еж')
+    await act(async () => input().dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    assert.equal(document.querySelector('.day-search'), null)
+    assert.equal(container.querySelector('.archive-search-match'), null)
+    assert.equal(sidebar.querySelector('.archive-search-match'), null)
+    assert.deepEqual(controller.state.doc.toJSON(), docBefore)
+    assert.deepEqual(getSemanticMarkup(controller.state), markupBefore)
+    assert.deepEqual(await snapshot(), before)
+  } finally {
+    dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect
+    await act(async () => root.unmount()); container.remove(); sidebar.remove(); icon.remove()
+  }
+})

@@ -18,6 +18,8 @@ export function createLastVerifiedBackupStore(storage) {
       if (result.restoreVerified !== true || result.isolatedRestoreDeleted !== true) throw new Error('Проверка резервной копии не завершена.')
       const metadata = Object.fromEntries(fields.map(field => [field, result[field]]))
       if (result.formatVersion !== undefined) metadata.formatVersion = result.formatVersion
+      if (result.migrationVerified !== undefined) metadata.migrationVerified = result.migrationVerified
+      if (result.migratedDbVersion !== undefined) metadata.migratedDbVersion = result.migratedDbVersion
       metadata.counts = { ...result.counts }
       metadata.verifiedAt = verifiedAt
       if (!storage) throw new Error('Не удалось сохранить сведения о проверенной копии.')

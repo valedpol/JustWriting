@@ -1,16 +1,16 @@
 const sections = [
-  { id: 'statistics', label: 'Статистика', available: true },
-  { id: 'meanings', label: 'Смыслы', available: false },
+  { id: 'statistics', label: 'Статистика' },
+  { id: 'meanings', label: 'Смыслы' },
 ]
 
-export default function ResearchNavigation({ onExit }) {
+export default function ResearchNavigation({ onExit, view = 'statistics', onSelect }) {
   return <nav className="side-menu research-local-menu" aria-label="Исследования">
     <span className="menu-item">Исследования</span>
     <div className="research-local-children">
       {sections.map((section) => <button key={section.id} type="button"
-        className={`menu-item${section.id === 'statistics' ? ' is-active' : ''}`}
-        aria-current={section.id === 'statistics' ? 'page' : undefined}
-        disabled={!section.available}>
+        className={`menu-item${section.id === view ? ' is-active' : ''}`}
+        aria-current={section.id === view ? 'page' : undefined}
+        onClick={() => onSelect?.(section.id)}>
         {section.label}
       </button>)}
     </div>

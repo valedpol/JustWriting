@@ -4,6 +4,8 @@
 .research-page .editor-column { min-height: 0; min-width: 0; }
 .research-content { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; padding: 28px; color: #262626; scrollbar-width: none; }
 .research-content::-webkit-scrollbar { display: none; }
+.research-meanings { display: grid; grid-template-columns: minmax(0, max-content); align-content: center; justify-content: center; gap: 36px; text-align: left; font: 400 20px/1.55 Georgia, 'Times New Roman', serif; }
+.research-meanings p { margin: 0; }
 .research-statistics { display: flex; align-items: flex-start; gap: 64px; margin: 4px 0 40px; overflow-x: auto; }
 .research-totals { display: flex; flex: 0 0 auto; flex-wrap: nowrap; gap: 42px; }
 .research-totals > div { flex: 0 0 auto; white-space: nowrap; }

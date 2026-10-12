@@ -1,0 +1,4 @@
+.day-search { position: fixed; z-index: 15; box-sizing: border-box; padding: 8px 12px; background: #fff; color: #555; font: 400 14px/1.5 system-ui, sans-serif; }
+.day-search .archive-search-paging { margin-top: 8px; gap: 4px; }
+.day-search .archive-search-paging button { min-width: 0; padding-inline: 4px; }
+.day-search .archive-search-form input { padding-inline: 0; }

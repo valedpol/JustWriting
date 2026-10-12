@@ -4,6 +4,8 @@ import { advanceDay, canWriteDay } from '../domain/grace.js'
 import { updateDayGoal } from '../domain/wordGoal.js'
 import { transaction } from './database.js'
 import { userDayFromText } from '../domain/userDay.js'
+import { saveMappedAnchors } from './publicationAnchorRepository.js'
+import { mapPublicationAnchors } from '../publications/liveAnchorMapping.js'
 
 export function loadProfile() {
   return transaction(['settings'], 'readwrite', (tx, done) => {
@@ -42,7 +44,7 @@ export function saveText(context, previous, content, acceptedAt = Date.now(), se
   return saveSnapshot(context, previous, { content }, !content.trim(), acceptedAt, sessionId)
 }
 
-export async function saveRichText(context, previous, snapshot, acceptedAt = Date.now(), sessionId = null) {
+export async function saveRichText(context, previous, snapshot, acceptedAt = Date.now(), sessionId = null, editProof = null) {
   if (snapshot?.contentFormat !== CONTENT_FORMAT || snapshot.contentVersion !== CONTENT_VERSION) {
     throw new Error('Неподдерживаемая версия документа')
   }
@@ -52,12 +54,13 @@ export async function saveRichText(context, previous, snapshot, acceptedAt = Dat
   return saveSnapshot(context, previous, {
     contentFormat: CONTENT_FORMAT, contentVersion: CONTENT_VERSION, document,
     content: documentToContent(document), semanticMarkup,
-  }, isDocumentEmpty(document), acceptedAt, sessionId)
+  }, isDocumentEmpty(document), acceptedAt, sessionId, editProof)
 }
 
-function saveSnapshot(context, previous, snapshot, empty, acceptedAt, sessionId) {
+function saveSnapshot(context, previous, snapshot, empty, acceptedAt, sessionId, editProof) {
   const { content } = snapshot
-  return transaction(['settings', 'texts', 'userDays'], 'readwrite', (tx, done, fail) => {
+  let commitAnchorReceipts = () => {}
+  return transaction(['settings', 'texts', 'userDays', 'publicationAnchors'], 'readwrite', (tx, done, fail) => {
     const store = tx.objectStore('texts')
     const request = store.index('userDay').get([context.userId, context.dayKey])
     request.onsuccess = () => {
@@ -105,6 +108,7 @@ function saveSnapshot(context, previous, snapshot, empty, acceptedAt, sessionId)
           savedDay = { ...savedDay, writingSessionId: sessionId, revision: savedDay.revision + 1 }
           days.put(savedDay)
         }
+        saveMappedAnchors(tx, current, record, editProof, committed => { commitAnchorReceipts = committed }, fail, mapPublicationAnchors)
         store.put(record)
         const profileRead = tx.objectStore('settings').get('localProfile')
         profileRead.onsuccess = () => {
@@ -119,6 +123,7 @@ function saveSnapshot(context, previous, snapshot, empty, acceptedAt, sessionId)
     }
   }).then((result) => {
     if (result?.rejected) throw new Error('Пользовательский день закрыт. Изменение текста запрещено.')
+    commitAnchorReceipts()
     return result
   })
 }

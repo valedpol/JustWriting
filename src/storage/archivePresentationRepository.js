@@ -3,10 +3,11 @@ import { archiveDocument } from '../editor/archiveDocument.js'
 import { CONTENT_FORMAT, CONTENT_VERSION, parseDocument } from '../editor/document.js'
 import { assertArchiveTransaction } from '../editor/archivePresentation.js'
 import { parseSemanticMarkup } from '../editor/semanticSnapshot.js'
+import { advanceAnchorRevision } from './publicationAnchorRepository.js'
 
 // Only one existing text record; content and all unrelated fields come from DB.
 export function saveArchivePresentation(userId, previous, tr) {
-  return transaction(['texts'], 'readwrite', (tx, done, fail) => {
+  return transaction(['texts', 'publicationAnchors'], 'readwrite', (tx, done, fail) => {
     const store = tx.objectStore('texts')
     const request = store.get(previous.textId)
     request.onsuccess = () => {
@@ -23,7 +24,7 @@ export function saveArchivePresentation(userId, previous, tr) {
         const record = { ...current, document, ...(markupChanged ? { semanticMarkup } : {}), contentFormat: CONTENT_FORMAT,
           contentVersion: CONTENT_VERSION, revision: (current.revision ?? 0) + 1 }
         store.put(record)
-        done(record)
+        advanceAnchorRevision(tx, current, record, done, fail)
       } catch (error) { fail(error) }
     }
   })

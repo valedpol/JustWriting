@@ -1,6 +1,8 @@
 import { transaction } from './database.js'
 import { createPublicIdentityRepository } from './publicIdentityRepository.js'
 import { createArchiveSourceAdapter } from './archiveSourceAdapter.js'
+import { initialPublicationAnchor } from '../publications/liveAnchors.js'
+import { readSourceAnchors } from './publicationAnchorRepository.js'
 import { assertChannels, makePublication, immutablePublication, feedPublicationProjection,
   sortPublications, publicProfileSettingsKey } from '../publications/model.js'
 
@@ -11,7 +13,7 @@ export function createPublicationRepository({ runTransaction = transaction, flus
       assertChannels(channels)
       const selectedChannels = [...channels]
       const prepared = await adapter.prepare(userId, source)
-      return runTransaction(['texts', 'userDays', 'settings', 'publications'], 'readwrite', (tx, done, fail) => {
+      return runTransaction(['texts', 'userDays', 'settings', 'publications', 'publicationAnchors'], 'readwrite', (tx, done, fail) => {
         const textRead = tx.objectStore('texts').get(prepared.source.sourceId)
         textRead.onsuccess = () => {
           const text = textRead.result
@@ -27,8 +29,23 @@ export function createPublicationRepository({ runTransaction = transaction, flus
                 const publishedAt = now()
                 const records = selectedChannels.map(channel => makePublication({ publicationId: id(), userId,
                   channel, publishedAt, prepared, profile: profileRead.result, settings: settingsRead.result }))
-                for (const record of records) tx.objectStore('publications').add(record)
-                done(records)
+                const active = tx.objectStore('publications').index('userSource').getAll([userId, prepared.source.sourceType, prepared.source.sourceId])
+                active.onsuccess = () => readSourceAnchors(tx, userId, prepared.source.sourceId, anchors => {
+                  const liveIds = new Set(active.result.map(record => record.publicationId))
+                  if (anchors.some(anchor => liveIds.has(anchor.publicationId) && anchor.status === 'attached' && anchor.sourceRevision !== text.revision)) {
+                    fail(new Error('Publication anchor revision conflict')); return
+                  }
+                  const exactIds = new Set(anchors.filter(anchor => liveIds.has(anchor.publicationId) && anchor.status === 'attached' &&
+                    anchor.range?.from === prepared.source.range.from && anchor.range?.to === prepared.source.range.to).map(anchor => anchor.publicationId))
+                  if (active.result.some(record => exactIds.has(record.publicationId) && selectedChannels.includes(record.channel))) {
+                    fail(new DOMException('Exact live publication already exists', 'ConstraintError')); return
+                  }
+                  for (const record of records) {
+                    tx.objectStore('publications').add(record)
+                    tx.objectStore('publicationAnchors').add(initialPublicationAnchor(record))
+                  }
+                  done(records)
+                })
               } catch (error) { fail(error) }
             }
           }
@@ -41,6 +58,19 @@ export function createPublicationRepository({ runTransaction = transaction, flus
       return runTransaction(['publications'], 'readonly', (tx, done) => {
         const read = tx.objectStore('publications').index('userChannelTime').getAll(IDBKeyRange.bound([userId, channel, 0], [userId, channel, Number.MAX_SAFE_INTEGER]))
         read.onsuccess = () => done(sortPublications(read.result).map(immutablePublication))
+      })
+    },
+    listArchivePublications(userId, sourceId) {
+      if (!userId || !sourceId) throw new Error('Invalid owner/source')
+      return runTransaction(['publications', 'publicationAnchors', 'texts'], 'readonly', (tx, done) => {
+        const read = tx.objectStore('publications').index('userSource').getAll([userId, 'archive', sourceId])
+        const text = tx.objectStore('texts').get(sourceId)
+        read.onsuccess = () => readSourceAnchors(tx, userId, sourceId, anchors => {
+          const byId = new Map(anchors.map(anchor => [anchor.publicationId, anchor]))
+          done(sortPublications(read.result).map(record => ({ ...immutablePublication(record),
+            liveAnchor: text.result?.userId === userId && byId.get(record.publicationId)?.sourceRevision === text.result.revision
+              ? byId.get(record.publicationId) : null })))
+        })
       })
     },
     async listFeedPublications() {
@@ -63,7 +93,7 @@ export function createPublicationRepository({ runTransaction = transaction, flus
     },
     deletePublication(userId, publicationId) {
       if (typeof userId !== 'string' || !userId || typeof publicationId !== 'string' || !publicationId) throw new Error('Invalid owner/publication')
-      return runTransaction(['publications', 'settings'], 'readwrite', (tx, done, fail) => {
+      return runTransaction(['publications', 'settings', 'publicationAnchors'], 'readwrite', (tx, done, fail) => {
         const store = tx.objectStore('publications'), read = store.get(publicationId)
         read.onsuccess = () => {
           if (!read.result || read.result.userId !== userId) { fail(new Error('Publication unavailable to owner')); return }
@@ -74,6 +104,7 @@ export function createPublicationRepository({ runTransaction = transaction, flus
             }
           }
           store.delete(publicationId)
+          tx.objectStore('publicationAnchors').delete(publicationId)
           done({ publicationId, deleted: true })
         }
       })
@@ -88,3 +119,4 @@ export const listFeedPublications = (...args) => repository.listFeedPublications
 export const deletePublication = (...args) => repository.deletePublication(...args)
 
 export const listReaderFeedPublications = (...args) => repository.listReaderFeedPublications(...args)
+export const listArchivePublications = (...args) => repository.listArchivePublications(...args)

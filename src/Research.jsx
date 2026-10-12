@@ -11,7 +11,7 @@ import { periodLabel } from './domain/calendarPeriod.js'
 import ResearchTotals from './components/ResearchTotals.jsx'
 import { createLastVerifiedBackupStore } from './backup/lastVerifiedBackup.js'
 
-export default function Research({ userId, flush }) {
+export default function Research({ userId, flush, view = 'statistics' }) {
   const [backupStore] = useState(() => createLastVerifiedBackupStore())
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
@@ -40,6 +40,11 @@ export default function Research({ userId, flush }) {
     // flush only drains the hook's stable queue ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
+  if (view === 'meanings') return <div className="research-content research-meanings">
+    <p>Смыслы появятся, когда накопится опыт.</p>
+    <p>Смыслы, не сомневайтесь, будут найдены.</p>
+    <p>...</p>
+  </div>
   if (!data) return <div className="research-content"><p role="status">{error || 'Загружаю…'}</p></div>
   const period = selected && selected <= data.calendarKey ? selected : data.currentKey
   const scale = periodScale(period)

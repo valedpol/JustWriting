@@ -20,11 +20,23 @@ test('about preserves plain text up to 300 Unicode characters, rejects over-limi
   assert.throws(() => publicProfileField('about', null), /300/)
 })
 test('public links allow safe HTTPS only, strip extra fields and never expose unsafe schemes/credentials', () => {
-  assert.deepEqual(publicProfileField('links', [{ label: ' Сайт ', url: 'https://example.org', secret: 'Private' }]), [{ label: 'Сайт', url: 'https://example.org/' }])
+  assert.deepEqual(publicProfileField('links', [{ label: ' Сайт ', url: 'https://example.org', secret: 'Private' }]), [{ label: 'Сайт', url: 'https://example.org' }])
   for (const url of ['javascript:alert(1)', 'data:text/html,hello', 'file:///tmp/x', 'http://example.org', '//example.org', 'https://user:pass@example.org', 'bad']) {
     assert.throws(() => publicProfileField('links', [{ label: 'Сайт', url }]))
   }
   assert.throws(() => publicProfileField('links', [{ label: '', url: 'https://example.org' }]))
+})
+test('Telegram shorthand becomes HTTPS while existing HTTPS URLs retain their spelling', () => {
+  for (const input of ['@User_name', 't.me/User_name', '  @User_name  ']) {
+    assert.deepEqual(publicProfileField('links', [{ label: 'Telegram', url: input }]), [{ label: 'Telegram', url: 'https://t.me/User_name' }])
+  }
+  for (const url of ['https://t.me/User_name', 'https://EXAMPLE.org/a%20b?q=hello%20world#part', 'https://example.org']) {
+    assert.equal(publicProfileField('links', [{ label: 'Ссылка', url }])[0].url, url)
+  }
+  for (const url of ['http://t.me/User_name', 'tg://resolve?domain=User_name', '//t.me/User_name', 't.me.evil.example/User_name',
+    't.me/User_name@evil.example', '@User_name/extra', 't.me/', '@', 'https://user:pass@t.me/User_name', 'https:example.org', 'https:/example.org']) {
+    assert.throws(() => publicProfileField('links', [{ label: 'Telegram', url }]), /https/)
+  }
 })
 test('stats projection retains only aggregates and trustworthy dates; unavailable values never turn into zero/date-now', () => {
   assert.equal(publicAuthorStats(null), null)

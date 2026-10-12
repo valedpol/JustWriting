@@ -94,7 +94,7 @@ test('profile settings persist without schema changes, preserve unknown fields/s
   const factory = { open: (name, version) => f.factory.open(name === 'just-writing' ? f.name : name, version),
     databases: async () => (await f.factory.databases()).map(row => ({ ...row, name: row.name === f.name ? 'just-writing' : row.name })), deleteDatabase: name => f.factory.deleteDatabase(name) }
   const backup = await captureBackup({ factory, flush: async () => {}, origin: 'https://test.invalid' })
-  assert.equal(JSON.parse(await backup.text()).formatVersion, 2)
+  assert.equal(JSON.parse(await backup.text()).formatVersion, 3)
   const restored = await restoreToNewDatabase(backup, { factory })
   assert.equal((await verifyRestoredDatabase(backup, restored, { factory })).verified, true)
   assert.deepEqual(await f.dump(), updated)
