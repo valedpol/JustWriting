@@ -1,11 +1,15 @@
 import philosophy from './content/philosophy.md?raw'
+import whitePaper from './content/white-paper.md?raw'
+import artifact from './content/artifact.md?raw'
+import studioPlan from './content/studio-plan.md?raw'
+import StudioMarkdown from './components/StudioMarkdown.jsx'
 import './Studio.css'
 
 const sections = [
-  { id: 'philosophy', label: 'Философия' },
-  { id: 'white-paper', label: 'White paper' },
-  { id: 'artifact', label: 'Артефакт' },
-  { id: 'plan', label: 'План студии' },
+  { id: 'philosophy', label: 'Философия', content: philosophy },
+  { id: 'white-paper', label: 'White paper', content: whitePaper },
+  { id: 'plan', label: 'План студии', content: studioPlan },
+  { id: 'artifact', label: 'Артефакты', content: artifact, separate: true },
 ]
 
 export function StudioNavigation({ view = 'philosophy', onSelect, onExit }) {
@@ -13,18 +17,16 @@ export function StudioNavigation({ view = 'philosophy', onSelect, onExit }) {
     <span className="menu-item">Студия</span>
     <div className="studio-local-children">
       {sections.map(section => <button key={section.id} type="button"
-        className={`menu-item${section.id === view ? ' is-active' : ''}`}
+        className={`menu-item${section.separate ? ' navigation-group-start' : ''}${section.id === view ? ' is-active' : ''}`}
         aria-current={section.id === view ? 'page' : undefined}
         onClick={() => onSelect(section.id)}>{section.label}</button>)}
+      <button type="button" className="menu-item" disabled>Библиотека</button>
     </div>
     <button type="button" className="menu-item studio-local-exit" aria-label="Выйти из Студии к Тексту сегодня" onClick={onExit}>←</button>
   </nav>
 }
 
 export default function Studio({ view = 'philosophy' }) {
-  return <article className="studio-content" aria-label={sections.find(section => section.id === view)?.label}>
-    {view === 'philosophy' ? philosophy.trim().split(/\r?\n\s*\r?\n/).map((paragraph, index) =>
-      <p key={index}>{paragraph.split(/(\*\*[^*]+\*\*)/g).map((part, partIndex) =>
-        part.startsWith('**') && part.endsWith('**') ? <strong key={partIndex}>{part.slice(2, -2)}</strong> : part)}</p>) : null}
-  </article>
+  const section = sections.find(section => section.id === view)
+  return <StudioMarkdown content={section?.content ?? ''} label={section?.label} />
 }

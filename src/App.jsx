@@ -8,12 +8,14 @@ import ReaderFeed from './components/ReaderFeed.jsx'
 import PublicProfileView from './components/PublicProfileView.jsx'
 import { findPublicIdentity } from './storage/publicIdentityRepository.js'
 import Research from './Research'
+import MainNavigation from './components/MainNavigation.jsx'
 import Studio, { StudioNavigation } from './Studio.jsx'
 import ResearchNavigation from './components/ResearchNavigation'
 import WordCounter from './components/WordCounter'
 import WritingEditor from './components/WritingEditor.jsx'
 import WritingTimer from './components/WritingTimer.jsx'
 import { useWritingTimer } from './hooks/useWritingTimer.js'
+import { useDayPhrase } from './hooks/useDayPhrase.js'
 import { useWorkspaceScroll } from './hooks/useWorkspaceScroll'
 import { SCREEN_MODES, initialScreen, editorScreenReducer, restoreScreen, rememberSection } from './domain/editorScreen'
 import { assertBackupWriterReady } from './backup/userBackup.js'
@@ -44,14 +46,15 @@ function App() {
   const [{ section, screenMode }, dispatchScreen] = useReducer(editorScreenReducer, initialScreen, () => restoreScreen())
   useEffect(() => { rememberSection(section) }, [section])
   const isToday = section === 'today'
+  const isArchiveWorkspace = section === 'archive' || section === 'publications'
   const [researchView, setResearchView] = useState('statistics')
   const [studioView, setStudioView] = useState('philosophy')
   const [publicProfile, setPublicProfile] = useState(null)
-  const viewingPublicProfile = (section === 'feed' || section === 'archive') && Boolean(publicProfile)
+  const viewingPublicProfile = (section === 'feed' || isArchiveWorkspace) && Boolean(publicProfile)
   const [publicIdentitySnapshot, setPublicIdentity] = useState(null)
   const ownPublicIdentity = publicIdentitySnapshot?.ownerId === userId ? publicIdentitySnapshot.identity : null
   useEffect(() => {
-    if (section !== 'archive' || !userId) return
+    if (!isArchiveWorkspace || !userId) return
     let live = true, generation = 0
     const reload = async () => {
       const request = ++generation
@@ -62,7 +65,7 @@ function App() {
     }
     reload(); window.addEventListener('focus', reload)
     return () => { live = false; window.removeEventListener('focus', reload) }
-  }, [section, userId])
+  }, [isArchiveWorkspace, section, userId])
   const profileLoaded = useCallback(profile => {
     if (profile) setPublicProfile(previous => previous?.publicId === profile.publicId ? { publicId: profile.publicId, displayName: profile.displayName } : previous)
   }, [])
@@ -74,6 +77,7 @@ function App() {
   const [settingsStatusHost, setSettingsStatusHost] = useState(null)
   const [backupActive, setBackupActive] = useState(false)
   const [now, setNow] = useState(new Date())
+  const dayPhrase = useDayPhrase(localProfile, now.getTime())
   const [daySearchOpen, setDaySearchOpen] = useState(false)
   const daySearchAnchor = useRef(null)
   const [timerSetupOpen, setTimerSetupOpen] = useState(false)
@@ -109,7 +113,7 @@ function App() {
     if (nextSection === 'archive' && section !== 'archive') { setArchiveWords(null); setPublicationSummary(null) }
     if (nextSection === 'studio' && section !== 'studio') setStudioView('philosophy')
     if (nextSection === 'research' && section !== 'research') setResearchView('statistics')
-    if (nextSection !== 'archive') setPublicIdentity(null)
+    if (!['archive', 'publications'].includes(nextSection)) setPublicIdentity(null)
     if (nextSection !== 'feed' || nextSection !== section) setPublicProfile(null)
     dispatchScreen({ type: 'section', section: nextSection })
   }
@@ -134,7 +138,7 @@ function App() {
   }
 
   return (
-    <div className={`app-shell screen-${screenMode}${section === 'feed' || viewingPublicProfile ? ' archive-page feed-page' : section === 'archive' ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : section === 'studio' ? ' studio-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
+    <div className={`app-shell screen-${screenMode}${section === 'feed' || viewingPublicProfile ? ' archive-page feed-page' : isArchiveWorkspace ? ' archive-page' : section === 'settings' ? ' settings-page' : section === 'research' ? ' research-page' : section === 'studio' ? ' studio-page' : ''}`} onClick={isToday ? handleAppClick : undefined}>
       <header className="topbar">
         <div className="brand-block">Just Writing</div>
 
@@ -255,32 +259,20 @@ function App() {
       <main className="main-layout" ref={workspaceRef}>
         <aside className="left-sidebar">
           {viewingPublicProfile ? <div className="public-profile-author-slot" ref={setPublicAuthorInfoHost} /> : <div className="quote-box">
-            <p>
-              Писать проще, когда вокруг тишина и достаточно времени, чтобы
-              услышать себя.
-            </p>
+            <p>{dayPhrase}</p>
           </div>}
 
-          {viewingPublicProfile ? <nav className="side-menu" aria-label="Публичный профиль"><button type="button" className="menu-item" aria-label={section === 'archive' ? 'Вернуться в Мои тексты' : 'Вернуться в Общую страницу'} onClick={() => setPublicProfile(null)}>←</button></nav> : section === 'studio' ? <StudioNavigation view={studioView} onSelect={setStudioView} onExit={() => openSection('today')} /> : section === 'research' ? <ResearchNavigation view={researchView} onSelect={setResearchView} onExit={() => openSection('today')} /> : section === 'archive' ? <div ref={setArchiveNavigationHost} className="archive-navigation-slot" /> : <nav className="side-menu" aria-label="Главное меню">
-            <button type="button" className={`menu-item${section === 'archive' ? ' is-active' : ''}`} aria-current={section === 'archive' ? 'page' : undefined} onClick={() => openSection('archive')}>
-              Мои тексты
-            </button>
-            <button type="button" className={`menu-item${section === 'today' ? ' is-active' : ''}`} aria-current={section === 'today' ? 'page' : undefined} onClick={() => openSection('today')}>
-              Текст сегодня
-            </button>
-            <button type="button" className={`menu-item${section === 'feed' ? ' is-active' : ''}`} aria-current={section === 'feed' ? 'page' : undefined} onClick={() => openSection('feed')}>
-              Общая страница
-            </button>
-            <button type="button" className={`menu-item${section === 'studio' ? ' is-active' : ''}`} aria-current={section === 'studio' ? 'page' : undefined} onClick={() => openSection('studio')}>
-              Студия
-            </button>
-            <button type="button" className={`menu-item${section === 'research' ? ' is-active' : ''}`} aria-current={section === 'research' ? 'page' : undefined} onClick={() => openSection('research')}>
-              Исследования
-            </button>
-            <button type="button" className={`menu-item${section === 'settings' ? ' is-active' : ''}`} aria-current={section === 'settings' ? 'page' : undefined} onClick={() => openSection('settings')}>
-              Настройки
-            </button>
-          </nav>}
+          {viewingPublicProfile ? <nav className="side-menu" aria-label="Публичный профиль"><button type="button" className="menu-item" aria-label={isArchiveWorkspace ? 'Вернуться в Опубликованные тексты' : 'Вернуться в Общую страницу'} onClick={() => setPublicProfile(null)}>←</button></nav>
+            : section === 'studio' ? <StudioNavigation view={studioView} onSelect={setStudioView} onExit={() => openSection('today')} />
+            : section === 'research' ? <ResearchNavigation view={researchView} onSelect={setResearchView} onExit={() => openSection('today')} />
+            : isArchiveWorkspace ? <div ref={setArchiveNavigationHost} className="archive-navigation-slot" />
+            : section === 'feed' ? <nav className="side-menu research-local-menu" aria-label="Опубликованные тексты">
+              <span className="menu-item">Опубликованные тексты</span>
+              <div className="research-local-children"><span className="menu-item is-active" aria-current="page">Общая страница</span></div>
+              <button type="button" className="menu-item research-local-exit" onClick={() => openSection('publications')}>←</button>
+            </nav>
+            : <MainNavigation section={section} onSelect={openSection} />}
+
         </aside>
 
         <section className="editor-column">
@@ -291,8 +283,8 @@ function App() {
               onActivate={() => setWritingScreenMode(SCREEN_MODES.standard)} />
           </div>
           {section === 'feed' ? <ReaderFeed key={userId} userId={userId} metadataHost={archiveMetadataHost} statusHost={settingsStatusHost} authorInfoHost={publicAuthorInfoHost} profile={publicProfile} onOpenProfile={setPublicProfile} onProfileLoaded={profileLoaded} /> : section === 'studio' ? <Studio view={studioView} /> : section === 'research' ? <Research userId={userId} flush={flush} view={researchView} /> : section === 'settings' ? <Settings profile={localProfile} onSave={updateSetting} statusHost={settingsStatusHost}
-            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : section === 'archive' ? <>
-            <MyTexts active={!viewingPublicProfile} publicIdentity={ownPublicIdentity} onOpenProfile={setPublicProfile} navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} onPublicationSummary={setPublicationSummary} />
+            onBackupActiveChange={setBackupActive} assertCanCreateBackup={() => assertBackupWriterReady(controller, status)} /> : isArchiveWorkspace ? <>
+            <MyTexts navigationGroup={section} onOpenFeed={() => openSection('feed')} active={!viewingPublicProfile} publicIdentity={ownPublicIdentity} onOpenProfile={setPublicProfile} navigationHost={archiveNavigationHost} onExit={() => openSection('today')} userId={userId} flush={flush} onTotalWords={setArchiveWords} metadataHost={archiveMetadataHost} onMetadataSaved={controller?.adoptArchiveMetadata} onPublicationSummary={setPublicationSummary} />
             {viewingPublicProfile ? <div className="reader-feed"><PublicProfileView key={publicProfile.publicId} publicId={publicProfile.publicId} metadataHost={archiveMetadataHost} authorInfoHost={publicAuthorInfoHost} statusHost={settingsStatusHost} onLoaded={profileLoaded} /></div> : null}
           </> : null}
         </section>
@@ -305,7 +297,7 @@ function App() {
           {isToday ? <>
             <WordCounter count={currentDayWords} goal={localProfile?.dailyWordGoal} />
           <span className="footer-status-text" role="status" title={error || 'Локальное хранение на этом устройстве'}>{status === 'loading' ? 'Загружаю' : status === 'saving' ? 'Сохраняю' : status === 'error' || status === 'load-error' ? 'Ошибка сохранения' : status === 'saved' ? 'Сохранено' : ''}</span>
-          </> : section === 'studio' && studioView === 'philosophy' ? <span className="footer-status-text studio-publication-note">© 2026 <strong><em>Just Writing</em></strong> · Сохранено и опубликовано</span> : section === 'archive' && !viewingPublicProfile ? publicationSummary ? publicationSummary.channel ?
+          </> : section === 'studio' && studioView === 'philosophy' ? <span className="footer-status-text studio-publication-note">© 2026 <strong><em>Just Writing</em></strong> · Сохранено и опубликовано</span> : isArchiveWorkspace && !viewingPublicProfile ? publicationSummary ? publicationSummary.channel ?
             <span className="footer-status-text" role="status">Опубликовано {publicationSummary.wordCount ?? '…'} {wordCountNoun(publicationSummary.wordCount ?? 0)}</span> : null : <>
             <span className="footer-status-text">Написано</span>
             <span>{archiveWords ?? '…'} слов</span>

@@ -4,6 +4,7 @@ import { act, createElement } from 'react'
 import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
 import { createLastVerifiedBackupStore } from '../backup/lastVerifiedBackup.js'
+import { createCreatedBackupCountStore } from '../backup/createdBackupCount.js'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true, url: 'https://backup.test' })
@@ -14,7 +15,7 @@ const server = await createServer({ server: { middlewareMode: true, hmr: false, 
 const { default: BackupData } = await server.ssrLoadModule('/src/components/BackupData.jsx')
 after(async () => { await server.close(); dom.window.close() })
 
-async function fixture({ createFailure, verifyFailure, storage = new Map(), gate, capturedAt, texts } = {}) {
+async function fixture({ createFailure, verifyFailure, storage = new Map(), gate, capturedAt, texts, downloadFailure, countFailure } = {}) {
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container), calls = [], active = []
   let phase = 'normal'
@@ -29,7 +30,7 @@ async function fixture({ createFailure, verifyFailure, storage = new Map(), gate
     async verify(file, expected) { calls.push({ file: file.name, receipt: expected }); if (verifyFailure) throw new Error(verifyFailure); if (gate) await gate; phase = 'normal'; return { ...receipt, filename: file.name } },
     async resume() { calls.push('resume'); phase = 'normal' },
   }
-  await act(async () => root.render(createElement(BackupData, { service, metadataStore: createLastVerifiedBackupStore({ getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }), download: () => { calls.push('download'); return { url: 'blob:test' } }, onActiveChange: value => active.push(value) })))
+  await act(async () => root.render(createElement(BackupData, { service, countStore: countFailure ? { increment() { throw new Error("storage failed") } } : createCreatedBackupCountStore({ getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }), metadataStore: createLastVerifiedBackupStore({ getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }), download: () => { calls.push('download'); if (downloadFailure) throw new Error(downloadFailure); return { url: 'blob:test' } }, onActiveChange: value => active.push(value) })))
   return { container, calls, active, storage,
     click: async label => act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === label).click()),
     async select(name) {
@@ -159,4 +160,40 @@ test('Account displays creation date and text count compactly, with collapsed di
     assert.ok(f.container.querySelector('details').textContent.includes('169'))
     assert.ok(!f.container.textContent.includes('Файл восстановлен и проверен в отдельной базе;'))
   } finally { await f.close() }
+})
+
+test('successful creations accumulate across remounts; verification, repeat checks and cancellation do not count', async () => {
+  const storage = new Map()
+  const count = () => createCreatedBackupCountStore({ getItem: key => storage.get(key) ?? null }).read()
+  let f = await fixture({ storage })
+  try {
+    assert.equal(count(), 0)
+    await f.select('old.json')
+    await f.select('old.json')
+    assert.equal(count(), 0)
+    await f.click('Создать резервную копию')
+    assert.equal(count(), 1)
+    await f.click('Вернуться к работе без проверки')
+    assert.equal(count(), 1, 'cancelling verification does not undo a created file')
+    await f.close()
+    f = await fixture({ storage })
+    assert.equal(count(), 1)
+    await f.click('Создать резервную копию')
+    assert.equal(count(), 2)
+    await f.select('new.json')
+    await f.select('new.json')
+    assert.equal(count(), 2)
+  } finally { await f.close() }
+})
+
+test('failed creation or download does not count; metadata failure is reported honestly', async () => {
+  for (const options of [{ createFailure: 'capture failed' }, { downloadFailure: 'download failed' }, { countFailure: true }]) {
+    const f = await fixture(options)
+    try {
+      await f.click('Создать резервную копию')
+      assert.equal(createCreatedBackupCountStore({ getItem: key => f.storage.get(key) ?? null }).read(), 0)
+      if (options.countFailure) assert.match(f.container.textContent, /не удалось сохранить счётчик/)
+      else assert.ok(f.container.querySelector('[role=alert]'))
+    } finally { await f.close() }
+  }
 })

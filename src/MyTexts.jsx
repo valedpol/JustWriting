@@ -16,6 +16,8 @@ import { filterArchivePeriod, archiveCalendarEntries } from './domain/archivePer
 import { archiveSearch } from './domain/archiveSearch.js'
 import MyTextsNavigation from './components/MyTextsNavigation.jsx'
 import { archiveSemanticIndex, archiveSemanticSelection } from './domain/archiveSemanticIndex.js'
+import { archiveDocument } from './editor/archiveDocument.js'
+import { parseDocument } from './editor/document.js'
 import './MyTexts.css'
 
 function ArchiveRailHost({ textId, register, onActive }) {
@@ -27,7 +29,7 @@ function dateLabel(key) {
   return key.split('-').reverse().join('.')
 }
 
-export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit, onPublicationSummary, active = true, publicIdentity, onOpenProfile }) {
+export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onMetadataSaved, navigationHost, onExit, onPublicationSummary, active = true, publicIdentity, onOpenProfile, navigationGroup, onOpenFeed }) {
   const returnScroll = useRef(null)
   const [publicationPage, setPublicationPage] = useState(null)
   const [publicationEntryEmpty, setPublicationEntryEmpty] = useState(false)
@@ -59,10 +61,15 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   const [searchOpen, setSearchOpen] = useState(false)
   const [semanticPage, setSemanticPage] = useState(null)
   const [semanticSelected, setSemanticSelected] = useState(null)
+  const [titleContext, setTitleContext] = useState(null)
+  const [titleReload, setTitleReload] = useState(0)
   const semanticReturn = useRef(null)
   const semanticIndex = useMemo(() => archiveSemanticIndex(records ?? []), [records])
   const semanticSelection = useMemo(() => semanticPage ? archiveSemanticSelection(records ?? [], semanticIndex, semanticPage, semanticSelected) : null,
     [records, semanticIndex, semanticPage, semanticSelected])
+  const titleItem = semanticPage === 'title' ? semanticSelection?.occurrences[0] : null
+  const titleView = semanticPage === 'title'
+  const titleWholeDay = titleItem && titleContext === titleItem.id
   const [calendarYearHost, setCalendarYearHost] = useState(null)
   const [draftQuery, setDraftQuery] = useState('')
   const [activeQuery, setActiveQuery] = useState('')
@@ -264,16 +271,18 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   useLayoutEffect(() => {
     if (!locateRequest || publicationPage || !active) return
     const occurrence = searchResults?.occurrences.find(item => item.id === locateRequest.id)
-    if (!occurrence && !locateRequest.markupId) return
+    if (!occurrence && !locateRequest.markupId && locateRequest.position === undefined) return
     const find = () => [...document.querySelectorAll('[data-search-occurrence]')].find(node => node.dataset.searchOccurrence === occurrence.id)
     const reveal = () => {
-      const bounds = locateRequest.markupId
+      const bounds = locateRequest.position !== undefined
+        ? editors.current.get(locateRequest.textId)?.locatePosition(locateRequest.position)
+        : locateRequest.markupId
         ? editors.current.get(locateRequest.textId)?.locateSemantic(locateRequest.markupId)
         : find()?.getBoundingClientRect()
       if (!bounds || !scrollArea.current) return false
       const area = scrollArea.current
       const viewport = area.getBoundingClientRect()
-      area.scrollTop += bounds.top - viewport.top - area.clientHeight / 3
+      area.scrollTop += bounds.top - viewport.top - (locateRequest.top ?? area.clientHeight / 3)
       setLocateRequest(null)
       return true
     }
@@ -282,7 +291,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     const observer = new MutationObserver(() => { if (reveal()) observer.disconnect() })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [locateRequest, records, expanded, activeQuery, period, searchResults?.occurrences, semanticPage, publicationPage, active])
+  }, [locateRequest, records, expanded, activeQuery, period, searchResults?.occurrences, semanticPage, publicationPage, active, titleContext, titleReload])
 
   const toggleRecord = async (record) => {
     const opening = !expanded.has(record.textId)
@@ -354,6 +363,12 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     } catch { setPeriodError('Не удалось завершить сохранение или загрузить публикации. Повторите вход.') }
     finally { setChangingPeriod(false) }
   }
+  useEffect(() => {
+    if (navigationGroup === 'publications') openPublications()
+    else if (navigationGroup === 'archive') setPublicationPage(null)
+    // Entry choice only; count changes must not switch channels.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigationGroup, userId])
   const openOwnProfile = async () => {
     if (!onOpenProfile || publicIdentity?.profileVisible !== true) return
     setChangingPeriod(true); setPeriodError('')
@@ -376,9 +391,11 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       semanticReturn.current = { expanded: new Set(expanded), hasOpened, scrollTop: scrollArea.current?.scrollTop ?? 0, period, activeQuery, activeSearchId }
       window.getSelection()?.removeAllRanges()
       setRecords(fresh)
-      setSemanticSelected(archiveSemanticSelection(fresh, archiveSemanticIndex(fresh), page, null).selected)
+      const selected = archiveSemanticSelection(fresh, archiveSemanticIndex(fresh), page, null)
+      setSemanticSelected(selected.selected)
       setSemanticPage(page)
-      setExpanded(new Set())
+      setTitleContext(null)
+      setExpanded(new Set(page === 'title' ? selected.records.map(record => record.textId) : []))
       setHasOpened(true)
       setPeriod(null)
       setActiveQuery('')
@@ -405,7 +422,8 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       window.getSelection()?.removeAllRanges()
       setRecords(fresh)
       setSemanticSelected(selected)
-      setExpanded(new Set())
+      setTitleContext(null)
+      setExpanded(new Set(semanticPage === 'title' ? archiveSemanticSelection(fresh, index, semanticPage, selected).records.map(record => record.textId) : []))
       setPeriod(null)
       setActiveQuery('')
       setLocateRequest(null)
@@ -413,6 +431,27 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       pendingCollapse.current = null
       resetResults.current = true
     } catch (error) { setPeriodError(error.message || 'Не удалось завершить сохранение.') }
+    finally { periodChange.current = false; setChangingPeriod(false) }
+  }
+  const toggleTitleContext = async () => {
+    if (periodChange.current || !titleItem) return
+    periodChange.current = true
+    setChangingPeriod(true); setPeriodError('')
+    const anchor = editors.current.get(titleItem.textId)?.viewportAnchor(titleItem.range)
+    const headerHeight = scrollArea.current?.querySelector('.archive-title-header')?.getBoundingClientRect().height ?? 0
+    try {
+      await Promise.all([...editors.current.values()].map(editor => editor.flush()))
+      await pendingWrites.current()
+      const fresh = [...await listTexts(userId)].sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+      const item = archiveSemanticIndex(fresh).titles.find(item => item.id === titleItem.id)
+      setRecords(fresh)
+      if (!item) throw new Error('Разметка больше недоступна. Выберите пункт из обновлённого списка.')
+      const changed = fresh.find(record => record.textId === item.textId)?.revision !== records.find(record => record.textId === item.textId)?.revision
+      if (changed) setTitleReload(value => value + 1)
+      window.getSelection()?.removeAllRanges()
+      setTitleContext(titleWholeDay ? null : item.id)
+      setLocateRequest(titleWholeDay && !item.range ? null : { textId: item.textId, position: changed ? item.position : anchor?.position ?? item.position, top: changed ? headerHeight : anchor?.top ?? headerHeight })
+    } catch (error) { setPeriodError(error.message || 'Не удалось показать контекст.') }
     finally { periodChange.current = false; setChangingPeriod(false) }
   }
   const closeSemantic = async () => {
@@ -438,7 +477,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
     } catch { setPeriodError('Не удалось завершить сохранение. Повторите возврат.') }
     finally { periodChange.current = false; setChangingPeriod(false) }
   }
-  const navigation = <MyTextsNavigation onExit={onExit} searchOpen={searchOpen} onSearchOpen={setSearchOpen}
+  const navigation = <MyTextsNavigation navigationGroup={navigationGroup} onOpenFeed={onOpenFeed} onExit={onExit} searchOpen={searchOpen} onSearchOpen={setSearchOpen}
     semanticPage={semanticPage} semanticIndex={semanticIndex} semanticSelected={semanticSelection?.selected}
     onSemanticSelect={selectSemantic} onSemanticOpen={openSemantic} onSemanticBack={closeSemantic}
     publicIdentity={publicIdentity} onOpenProfile={onOpenProfile ? openOwnProfile : undefined}
@@ -449,8 +488,8 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
       if (channel !== publicationPage) updatePublicationWords(channel, null)
       setPublicationPage(channel)
     }}
-    onPublicationsBack={() => setPublicationPage(null)} />
-  return <>{active ? navigationHost ? createPortal(navigation, navigationHost) : navigation : null}<div className="editor-shell my-texts" hidden={!active || !!publicationPage}>
+    onPublicationsBack={navigationGroup === 'publications' ? onExit : () => setPublicationPage(null)} />
+  return <>{active ? navigationHost ? createPortal(navigation, navigationHost) : navigation : null}<div className="editor-shell my-texts" hidden={!active || !!publicationPage || navigationGroup === 'publications'}>
     {records ? <div className="archive-calendar-controls">
       <div className="archive-calendar-heading">
       <button type="button" aria-expanded={calendarOpen} aria-controls="archive-calendar" onMouseDown={event => event.preventDefault()} onClick={() => setCalendarOpen(open => !open)}>Календарь</button>
@@ -474,20 +513,26 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
           {visibleRecords.map((record) => <li key={record.textId} data-text-id={record.textId}
             onMouseDownCapture={() => { activeRecord.current = record.textId }}
             onFocusCapture={() => { activeRecord.current = record.textId }}>
-            {!expanded.has(record.textId) ? <button className="archive-preview-button" type="button" aria-label={`Раскрыть текст за ${dateLabel(record.dayKey)}`} aria-expanded={false} onClick={() => toggleRecord(record)}>
+            {!titleView && !expanded.has(record.textId) ? <button className="archive-preview-button" type="button" aria-label={`Раскрыть текст за ${dateLabel(record.dayKey)}`} aria-expanded={false} onClick={() => toggleRecord(record)}>
               <span className="text-preview">{record.content.trim().replace(/\s+/g, ' ').slice(0, 240) || 'Текст пуст.'}</span>
             </button> : null}
-            {expanded.has(record.textId) ? <>
-              <div className="archive-record-header" onClick={() => toggleRecord(record)}>
+            {titleView || expanded.has(record.textId) ? <>
+              {titleView ? <div className="archive-title-header">
+                <strong>{titleItem?.value}</strong>
+                <button type="button" disabled={changingPeriod} onClick={toggleTitleContext}>{titleWholeDay ? 'Только текст' : 'Весь день'}</button>
+              </div> : <div className="archive-record-header" onClick={() => toggleRecord(record)}>
               <button className="archive-record-info" type="button" aria-expanded aria-label={`Свернуть текст за ${dateLabel(record.dayKey)}`}>
                 {dateLabel(record.dayKey)}
               </button>
-              </div>
+              </div>}
+              {titleView && !titleWholeDay && !titleItem?.range ? <p className="archive-title-unresolved">Границы текста ещё не заданы.</p> :
               <div className="saved-text" aria-label="Сохранённый текст, только для чтения">
                 <ArchiveWritingEntry ref={editor => { if (editor) editors.current.set(record.textId, editor); else editors.current.delete(record.textId) }}
+                  key={titleView ? `${titleItem?.id}:${titleReload}` : record.textId}
+                  visibleRange={titleView && !titleWholeDay ? titleItem?.range : null} contextRange={titleWholeDay ? titleItem?.range : null}
                   searchOccurrences={searchResults?.occurrences.filter(item => item.textId === record.textId)} activeSearchId={effectiveActiveSearchId}
                   record={record} active={active && !publicationPage} layoutRevision={calendarOpen} metadataHost={railHosts[record.textId]} scrollElement={scrollElement} onSaved={handleSaved} />
-              </div>
+              </div>}
             </> : null}
           </li>)}
         </ul> : <p>{period ? 'В выбранном периоде текстов нет.' : semanticPage ? semanticPage === 'title' ? 'Названий пока нет.' : 'Тегов пока нет.' : activeQuery ? 'Совпадений нет.' : 'Сохранённых текстов пока нет.'}</p>}
@@ -495,13 +540,13 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
   </div>
     {active && !publicationPage && metadataHost && metadataLayout && records ? createPortal(
       <>
-      {expanded.size > 0 ? <div className="archive-actions" style={{ top: metadataLayout.actionsTop }}>
+      {!titleView && expanded.size > 0 ? <div className="archive-actions" style={{ top: metadataLayout.actionsTop }}>
         <button type="button" onClick={collapseAll}>Схлопнуть все тексты</button>
       </div> : null}
       <div className="archive-day-metadata" style={{ top: metadataLayout.top, height: metadataLayout.height }}>
         {visibleRecords.map((record, index) => {
           const position = metadataLayout.positions[index]
-          const open = expanded.has(record.textId)
+          const open = titleView || expanded.has(record.textId)
           const top = position?.top ?? 0
           const bottom = position?.bottom ?? top
           return open ? <div key={record.textId}>
@@ -509,10 +554,11 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
             <div className="archive-day-label archive-sticky-date"
               style={{ top: archiveDateTop(top, bottom, position?.dateHeight ?? 40) }}>
               <button type="button" data-archive-date={record.textId}
-                aria-label={`Выделить весь текст за ${dateLabel(record.dayKey)}`}
+                disabled={titleView && !titleWholeDay && !titleItem?.range}
+                aria-label={titleView && !titleWholeDay ? `Выделить текст «${titleItem?.value}»` : `Выделить весь текст за ${dateLabel(record.dayKey)}`}
                 onMouseDown={event => event.preventDefault()} onClick={() => selectDay(record)}>
                 <span>{dateLabel(record.dayKey)}</span>
-                <span>{getWordCount(record.content).toLocaleString('ru-RU')} слов</span>
+                {titleView && !titleWholeDay && !titleItem?.range ? null : <span>{getWordCount(titleView && !titleWholeDay ? parseDocument(archiveDocument(record)).textBetween(titleItem.range.from, titleItem.range.to, '\n', '\n') : record.content).toLocaleString('ru-RU')} слов</span>}
               </button>
             </div>
           </div> : <div
@@ -534,7 +580,7 @@ export default function MyTexts({ userId, flush, onTotalWords, metadataHost, onM
         })}
       </div></>, metadataHost,
     ) : null}
-    {publicationPage ? <OwnerPublications key={`${userId}:${publicationPage}`} userId={userId} channel={publicationPage} onBusyChange={setPublicationBusy} onCountChange={updatePublicationCount} onWordCountChange={updatePublicationWords} metadataHost={metadataHost}
+    {publicationPage && active ? <OwnerPublications key={`${userId}:${publicationPage}`} userId={userId} channel={publicationPage} onBusyChange={setPublicationBusy} onCountChange={updatePublicationCount} onWordCountChange={updatePublicationWords} metadataHost={metadataHost}
       emptyMessage={publicationEntryEmpty ? 'Публикаций нет.' : undefined} /> : null}
   </>
 }

@@ -201,6 +201,7 @@ test('owner-only removal uses confirmation, isolates other channels/source and e
 
 test('existing Common page navigation renders Reader Feed without an extra global Feed item, preserves today editor and never composes archive/owner-only content', async t => {
   const f = await fixture(t)
+  globalThis.__readerRunTransaction = f.runTransaction
   globalThis.__readerApi = f.api
   globalThis.__readerProfileApi = f.profileApi
   globalThis.__readerToday = { userId: f.users[0], localProfile: f.profiles[0], text: '', status: 'saved', ready: true,
@@ -209,6 +210,8 @@ test('existing Common page navigation renders Reader Feed without an extra globa
   await act(async () => f.root.render(createElement(App)))
   const editor = f.container.querySelector('.today-editor-shell')
   assert.equal(button(f.container.querySelector('nav'), 'Лента'), undefined)
+  await click(button(f.container, 'Опубликованные тексты'))
+  await settle(() => button(f.container, 'Общая страница') && !button(f.container, 'Общая страница').disabled)
   await click(button(f.container, 'Общая страница'))
   await settle(() => f.container.querySelectorAll('.reader-feed article').length === 5)
   assert.equal(editor.hidden, true)
@@ -233,6 +236,9 @@ test('existing Common page navigation renders Reader Feed without an extra globa
   assert.equal(topbar.querySelector('.public-page-header').textContent, publicHeader)
   await click(f.container.querySelector('[aria-label="Сбросить фильтр автора"]'))
   assert.equal(f.container.querySelector('.reader-feed h1'), null)
+  await click(button(f.container, '←'))
+  await settle(() => f.container.querySelector('.owner-publications'))
+  await click(button(f.container, '←'))
   await click(button(f.container, 'Текст сегодня'))
   assert.ok(topbar.querySelector('.meta-user'))
   assert.ok(topbar.querySelector('.meta-countdown'))
@@ -620,91 +626,58 @@ test('Public Profile marginal dates follow the sticky pin and stay clear of its 
 
 async function mountArchiveApp(f, t) {
   globalThis.__readerRunTransaction = f.runTransaction
+  globalThis.__readerRunTransaction = f.runTransaction
   globalThis.__readerApi = f.api; globalThis.__readerProfileApi = f.profileApi
   globalThis.__readerToday = { userId: f.users[0], localProfile: f.profiles[0], text: '', status: 'saved', ready: true,
     flush: async () => {}, endWriting() {}, updateSetting() {}, dayEndsAt: Date.now() + 100000, graceUntil: null }
   t.after(() => { delete globalThis.__readerRunTransaction })
   const { default: App } = await server.ssrLoadModule('/src/App.jsx')
   await act(async () => f.root.render(createElement(App)))
-  await click(button(f.container, 'Мои тексты'))
+  await click(button(f.container, 'Опубликованные тексты'))
   await settle(() => f.container.querySelector('[data-text-id]'))
 }
 
-test('My Texts opens the same guest Public Profile by publicId and returns to its retained calendar, expanded editor and scroll; nickname and alias stay live', { timeout: 10000 }, async t => {
-  const f = await fixture(t)
-  const before = await f.dump()
+test('Published texts opens the same guest Public Profile by publicId and returns to its channel; nickname and alias stay live', { timeout: 10000 }, async t => {
+  const f = await fixture(t), before = await f.dump()
   await mountArchiveApp(f, t)
-  const navigation = () => f.container.querySelector('nav[aria-label="Мои тексты"]')
-  await settle(() => button(navigation(), 'Профиль'))
-  assert.deepEqual([...navigation().querySelectorAll('button')].map(node => node.textContent), ['Поиск', 'Названия', 'Теги', 'Публикации', 'Профиль', '←'])
-  const archive = f.container.querySelector('.my-texts'), scroller = archive.querySelector('.archive-scroll')
-  await click(archive.querySelector('[aria-controls="archive-calendar"]'))
-  await click(button(archive.querySelector('[aria-label="Годы"]'), '2026'))
-  await settle(() => !navigation().querySelector('button').disabled)
-  await click(archive.querySelector('.archive-preview-button'))
-  const editor = archive.querySelector('.ProseMirror')
-  assert.ok(editor)
-  scroller.scrollTop = 127
-  const criterion = archive.querySelector('.archive-period').textContent
+  const navigation = () => f.container.querySelector('nav[aria-label="Опубликованные тексты"]')
+  await settle(() => button(navigation(), 'Посмотреть профиль как гость'))
+  const channel = navigation().querySelector('[aria-current=page]').textContent
   const projected = await f.profileApi.load(f.publicProfiles[0].publicId)
-  await click(button(navigation(), 'Профиль'))
+  await click(button(navigation(), 'Посмотреть профиль как гость'))
   await settle(() => f.container.querySelector('.public-profile-view article'))
-  assert.equal(archive.hidden, true)
-  assert.equal(f.container.querySelector('.reader-feed-content'), null, 'direct entry does not mount Reader Feed')
+  assert.equal(button(f.container.querySelector('.right-sidebar'), 'Снять с публикации'), undefined)
+  assert.equal(f.container.querySelector('.reader-feed-content'), null)
   assert.equal(f.container.querySelector('.public-page-title').textContent, 'Профиль Mumipol')
-  assert.equal(f.container.querySelector('.bottom-bar').textContent.trim(), 'Опубликовано 1 текст')
   const profileNavigation = f.container.querySelector('nav[aria-label="Публичный профиль"]')
   assert.equal(profileNavigation.textContent, '←')
-  assert.ok(!profileNavigation.querySelector('.is-active'))
-  const right = f.container.querySelector('.right-sidebar')
-  assert.equal(right.querySelector('button'), null, 'there are no owner, archive or selection controls in the guest profile')
-  const profileScroller = f.container.querySelector('.public-profile-view .archive-scroll')
-  profileScroller.scrollTop = 0
-  const metadataWheel = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 })
-  right.querySelector('time').dispatchEvent(metadataWheel)
-  assert.equal(metadataWheel.defaultPrevented, true)
-  assert.equal(profileScroller.scrollTop, 40)
-  assert.equal(scroller.scrollTop, 127, 'profile wheel must not scroll the retained hidden archive')
-  assert.equal(f.container.querySelector('.public-profile-view h2 button').textContent, projected.publications[0].snapshot.title)
+  assert.equal(profileNavigation.querySelector('.is-active'), null)
+  assert.equal(f.container.querySelector('.right-sidebar button'), null)
   const { default: PublicProfileView } = await server.ssrLoadModule('/src/components/PublicProfileView.jsx')
-  const guestContainer = document.createElement('div'), guestInfo = document.createElement('aside'), guestMetadata = document.createElement('aside')
-  document.body.append(guestContainer, guestInfo, guestMetadata)
+  const guestContainer = document.createElement('div'), guestInfo = document.createElement('aside')
+  document.body.append(guestContainer, guestInfo)
   const guestRoot = createRoot(guestContainer)
   try {
-    await act(async () => guestRoot.render(createElement(PublicProfileView, { publicId: projected.publicId, metadataHost: guestMetadata, authorInfoHost: guestInfo, api: f.profileApi })))
+    await act(async () => guestRoot.render(createElement(PublicProfileView, { publicId: projected.publicId, authorInfoHost: guestInfo, api: f.profileApi })))
     await settle(() => guestContainer.querySelector('article'))
-    assert.equal(f.container.querySelector('.public-profile-view article').innerHTML, guestContainer.querySelector('article').innerHTML, 'the direct owner route renders the identical guest snapshot')
+    assert.equal(f.container.querySelector('.public-profile-view article').innerHTML, guestContainer.querySelector('article').innerHTML)
     assert.equal(f.container.querySelector('.public-profile-introduction').innerHTML, guestInfo.querySelector('.public-profile-introduction').innerHTML)
-  } finally { await act(async () => guestRoot.unmount()); guestContainer.remove(); guestInfo.remove(); guestMetadata.remove() }
-  await click(f.container.querySelector('[aria-label="Вернуться в Мои тексты"]'))
-  assert.equal(f.container.querySelector('.public-profile-view'), null)
-  assert.equal(f.container.querySelector('.my-texts'), archive)
-  assert.equal(archive.hidden, false)
-  assert.equal(archive.querySelector('.ProseMirror'), editor)
-  assert.equal(archive.querySelector('.archive-period').textContent, criterion)
-  assert.equal(scroller.scrollTop, 127)
-  assert.equal(f.container.querySelector('.bottom-bar').textContent.trim(), 'Написано4 слов')
-  assert.deepEqual(await f.dump(), before, 'navigation does not write settings, source or publications')
+  } finally { await act(async () => guestRoot.unmount()); guestContainer.remove(); guestInfo.remove() }
+  await click(f.container.querySelector('[aria-label="Вернуться в Опубликованные тексты"]'))
+  await settle(() => f.container.querySelector('.owner-publications article'))
+  assert.equal(navigation().querySelector('[aria-current=page]').textContent, channel)
+  assert.deepEqual(await f.dump(), before)
   await f.identityRepo.savePublicNickname(f.users[0], 'New nickname'); await f.refresh()
-  await click(button(navigation(), 'Профиль'))
+  await click(button(navigation(), 'Посмотреть профиль как гость'))
   await settle(() => f.container.querySelector('.public-page-title')?.textContent === 'Профиль New nickname')
   await f.identityRepo.savePublicNickname(f.users[0], ''); await f.refresh()
   await settle(() => f.container.querySelector('.public-page-title')?.textContent === `Профиль ${f.publicProfiles[0].publicAlias}`)
-  await click(f.container.querySelector('[aria-label="Вернуться в Мои тексты"]'))
-  await click(button(navigation(), 'Профиль'))
-  await settle(() => f.container.querySelector('.public-profile-view article'))
-  assert.equal(f.container.querySelector('.public-page-title').textContent, `Профиль ${f.publicProfiles[0].publicAlias}`)
-  assert.deepEqual((await f.dump()).publications, before.publications, 'nickname changes never rewrite snapshots')
-  await click(f.container.querySelector('[aria-label="Вернуться в Мои тексты"]'))
-  await click(button(navigation(), 'Публикации'))
-  await settle(() => f.container.querySelector('[aria-label="Публикации: Профиль"] article'))
-  assert.ok(button(right, 'Снять с публикации'), 'owner Profile library remains a separate route')
-  assert.ok(button(right, 'Закрепить в профиле'))
-  await click(button(navigation(), '←'))
-  await click(button(navigation(), '←'))
-  await f.identityRepo.savePublicIdentitySetting(f.users[0], 'profileVisible', false)
-  await click(button(f.container, 'Мои тексты')); await f.refresh()
-  assert.equal(button(navigation(), 'Профиль'), undefined, 're-entry reads the current permission after leaving the archive')
+  assert.deepEqual((await f.dump()).publications, before.publications)
+  await click(f.container.querySelector('[aria-label="Вернуться в Опубликованные тексты"]'))
+  await settle(() => f.container.querySelector('.owner-publications article'))
+  assert.ok(button(f.container.querySelector('.right-sidebar'), 'Снять с публикации'))
+  await f.identityRepo.savePublicIdentitySetting(f.users[0], 'profileVisible', false); await f.refresh()
+  assert.equal(button(navigation(), 'Посмотреть профиль как гость'), undefined)
 })
 
 test('My Texts omits the profile entry when visibility is false or absent and does not initialize missing identity', async t => {
@@ -716,9 +689,9 @@ test('My Texts omits the profile entry when visibility is false or absent and do
     })
     const before = await f.dump()
     await mountArchiveApp(f, t); await f.refresh()
-    const navigation = f.container.querySelector('nav[aria-label="Мои тексты"]')
-    assert.equal(button(navigation, 'Профиль'), undefined)
-    assert.ok(button(navigation, 'Публикации'))
+    const navigation = f.container.querySelector('nav[aria-label="Опубликованные тексты"]')
+    assert.equal(button(navigation, 'Посмотреть профиль как гость'), undefined)
+    assert.ok(navigation.querySelector('.owner-publication-channel-label'))
     assert.equal(f.container.querySelector('.public-profile-view'), null)
     assert.deepEqual(await f.dump(), before)
     await act(async () => f.root.render(null))
@@ -727,11 +700,14 @@ test('My Texts omits the profile entry when visibility is false or absent and do
 
 test('Feed profile entry uses stable publicId and independent visibility, public header/back preserve author filter, expanded card and scroll', { timeout: 10000 }, async t => {
   const f = await fixture(t)
+  globalThis.__readerRunTransaction = f.runTransaction
   globalThis.__readerApi = f.api; globalThis.__readerProfileApi = f.profileApi
   globalThis.__readerToday = { userId: f.users[0], localProfile: f.profiles[0], text: '', status: 'saved', ready: true,
     flush: async () => {}, endWriting() {}, updateSetting() {}, dayEndsAt: Date.now() + 100000, graceUntil: null }
   const { default: App } = await server.ssrLoadModule('/src/App.jsx')
   await act(async () => f.root.render(createElement(App)))
+  await click(button(f.container, 'Опубликованные тексты'))
+  await settle(() => button(f.container, 'Общая страница') && !button(f.container, 'Общая страница').disabled)
   await click(button(f.container, 'Общая страница'))
   await settle(() => f.container.querySelectorAll('.reader-feed article').length === 5)
   const sidebar = f.container.querySelector('.right-sidebar')
@@ -787,7 +763,7 @@ test('Feed profile entry uses stable publicId and independent visibility, public
   await click(f.container.querySelector('[aria-label="Вернуться в Общую страницу"]'))
   assert.equal(f.container.querySelector('.public-profile-view'), null)
   assert.equal(f.container.querySelector('.public-page-title').textContent, 'Общая страница')
-  assert.ok(!f.container.querySelector('nav[aria-label="Главное меню"]').textContent.includes('Профиль'))
+  assert.ok(!f.container.querySelector('nav[aria-label="Опубликованные тексты"]').textContent.includes('Посмотреть профиль как гость'))
   assert.equal(f.container.querySelector('.reader-feed h1').textContent, 'Polevoy×')
   assert.equal(f.container.querySelector('.reader-feed-content .archive-scroll'), scroller)
   assert.equal(scroller.scrollTop, 127)

@@ -8,7 +8,7 @@ import { getSemanticMarkup } from '../editor/semanticHistory.js'
 import { TextSelection } from '@tiptap/pm/state'
 import { focusView } from '../editor/focusView.js'
 
-const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, metadataHost, scrollElement, onSaved, searchOccurrences, activeSearchId, layoutRevision, active = true }, ref) {
+const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, metadataHost, scrollElement, onSaved, searchOccurrences, activeSearchId, layoutRevision, visibleRange, contextRange, active = true }, ref) {
   const editor = useRef(null)
   const fallback = useRef(null)
   const [loaded] = useState(() => {
@@ -17,6 +17,19 @@ const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, me
   })
   useEffect(() => loaded.controller ? registerBackupFlush(() => loaded.controller.flush()) : undefined, [loaded])
   useImperativeHandle(ref, () => ({ flush: () => loaded.controller?.flush() ?? Promise.resolve(),
+    locatePosition(position) {
+      const view = editor.current?.instance
+      return view ? view.coordsAtPos(Math.min(view.state.doc.content.size, Math.max(0, position)), 1) : null
+    },
+    viewportAnchor(range) {
+      const view = editor.current?.instance
+      if (!view || !scrollElement || !range) return null
+      const viewport = scrollElement.getBoundingClientRect()
+      const start = view.coordsAtPos(range.from, 1)
+      // Keep a source-coordinate landmark even when its line is above the
+      // viewport. Hit-testing a clipped paragraph can choose a different line.
+      return { position: range.from, top: start.top - viewport.top }
+    },
     locateSemantic(id) {
       const view = editor.current?.instance
       if (!view) return null
@@ -37,11 +50,13 @@ const ArchiveWritingEntry = forwardRef(function ArchiveWritingEntry({ record, me
       selection.removeAllRanges()
       selection.addRange(range)
     }
-  } }), [loaded])
+  } }), [loaded, scrollElement])
+  if (loaded.error && visibleRange) return <p role="status">Не удалось отобразить именованный фрагмент.</p>
   if (loaded.error) return <div ref={fallback}><ReadonlyDocument record={record} /></div>
   return <div className="archive-writing-entry">
     <WritingEditor ref={editor} controller={loaded.controller} active={active} writing ready readonlyContent
       searchOccurrences={searchOccurrences} activeSearchId={activeSearchId} layoutRevision={layoutRevision}
+      visibleRange={visibleRange} contextRange={contextRange}
       metadataHost={metadataHost} scrollElement={scrollElement} />
   </div>
 })

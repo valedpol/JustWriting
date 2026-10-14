@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createUserBackupService } from '../backup/userBackup.js'
 import { createLastVerifiedBackupStore } from '../backup/lastVerifiedBackup.js'
+import { createCreatedBackupCountStore } from '../backup/createdBackupCount.js'
 import { downloadFile } from '../utils/files.js'
 
 function backupDate(timestamp) {
@@ -23,9 +24,10 @@ function errorMessage(error) {
   return message
 }
 
-export default function BackupData({ assertCanCreate, onActiveChange = () => {}, service: suppliedService, download = downloadFile, metadataStore: suppliedMetadataStore }) {
+export default function BackupData({ assertCanCreate, onActiveChange = () => {}, service: suppliedService, download = downloadFile, metadataStore: suppliedMetadataStore, countStore: suppliedCountStore }) {
   const [service] = useState(() => suppliedService ?? createUserBackupService())
   const [metadataStore] = useState(() => suppliedMetadataStore ?? createLastVerifiedBackupStore())
+  const [countStore] = useState(() => suppliedCountStore ?? createCreatedBackupCountStore())
   const [lastVerified, setLastVerified] = useState(() => metadataStore.read())
   const [phase, setPhase] = useState('idle')
   const [message, setMessage] = useState('')
@@ -52,6 +54,11 @@ export default function BackupData({ assertCanCreate, onActiveChange = () => {},
       if (downloadURL.current) URL.revokeObjectURL(downloadURL.current)
       downloadURL.current = download(captured.file, filename).url
       setPhase('awaiting')
+      try { countStore.increment() }
+      catch {
+        setMessage('Копия создана и передана на скачивание, но не удалось сохранить счётчик резервных копий. Вы можете проверить сохранённый файл.')
+        return
+      }
       setMessage('Сохраните файл. Затем выберите сохранённую копию с диска для проверки. Скачивание ещё не означает, что копия проверена.')
     } catch (error) {
       setPhase('error'); setMessage(errorMessage(error))

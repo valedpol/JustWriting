@@ -136,3 +136,10 @@
 .archive-semantic-count { flex-shrink: 0; color: #777; font: 400 13px/1.55 system-ui, sans-serif; }
 .archive-semantic-selector button:focus-visible { outline: 1px solid #777; outline-offset: 4px; }
 .archive-semantic-selector button:disabled { opacity: .4; cursor: default; }
+.archive-title-hidden { display: none !important; }
+.archive-title-context { background: #f0f0ec; }
+.archive-title-header { position: sticky; top: 0; z-index: 3; background: #fff; display: flex; align-items: baseline; justify-content: space-between; gap: 20px; padding-bottom: 16px; }
+.archive-title-header strong { font: bold 20px/1.55 Georgia, 'Times New Roman', serif; }
+.archive-title-header button { flex-shrink: 0; color: #777; font: 400 13px/1.45 system-ui, sans-serif; }
+.archive-title-header button:disabled { opacity: .4; cursor: default; }
+.archive-title-unresolved { color: #777; font: 400 16px/1.55 Georgia, 'Times New Roman', serif; }

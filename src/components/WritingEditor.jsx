@@ -18,6 +18,7 @@ import DaySearch from './DaySearch.jsx'
 import { currentDaySearch } from '../editor/currentDaySearch.js'
 import { searchDecorations } from '../editor/searchDecorations.js'
 import { publicationDecorations } from '../editor/publicationDecorations.js'
+import { titleRangeDecorations } from '../editor/titleRangeDecorations.js'
 import { attachedLiveRange } from '../publications/liveAnchors.js'
 import { stickySelectionPanelTop } from '../editor/selectionPanelGeometry.js'
 import { useArchivePublications } from '../hooks/useArchivePublications.js'
@@ -53,7 +54,8 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     const search = searchDecorations(state.doc, searchDisplay.current.searchOccurrences, searchDisplay.current.activeSearchId)
     const display = publicationDisplay.current
     const highlights = latest.current.readonlyContent ? publicationDecorations(state.doc, controller?.snapshot.record, display.records, display.highlightedPublicationId).find() : []
-    return search.add(state.doc, highlights)
+    const title = latest.current.readonlyContent ? titleRangeDecorations(state.doc, latest.current.visibleRange, latest.current.contextRange) : []
+    return search.add(state.doc, [...highlights, ...title])
   }, [controller])
   const host = useRef(null)
   const viewRef = useRef(null)
@@ -101,15 +103,18 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     selectAll() {
       const view = viewRef.current
       if (!view) return
-      view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)))
+      const range = latest.current.readonlyContent && latest.current.visibleRange
+      view.dispatch(view.state.tr.setSelection(range ? TextSelection.between(view.state.doc.resolve(range.from), view.state.doc.resolve(range.to)) : new AllSelection(view.state.doc)))
       focusView(view)
     },
     toggleSelectAll() {
       const view = viewRef.current
       if (!view) return
-      const clear = coversWholeText(view.dom, view.dom.ownerDocument.getSelection())
+      const range = latest.current.readonlyContent && latest.current.visibleRange
+      const scopedSelection = range ? TextSelection.between(view.state.doc.resolve(range.from), view.state.doc.resolve(range.to)) : null
+      const clear = scopedSelection ? view.state.selection.eq(scopedSelection) : coversWholeText(view.dom, view.dom.ownerDocument.getSelection())
       cancelPanel()
-      view.dispatch(view.state.tr.setSelection(clear ? Selection.atStart(view.state.doc) : new AllSelection(view.state.doc)))
+      view.dispatch(view.state.tr.setSelection(range ? clear ? TextSelection.between(view.state.doc.resolve(range.from), view.state.doc.resolve(range.from)) : scopedSelection : clear ? Selection.atStart(view.state.doc) : new AllSelection(view.state.doc)))
       focusView(view)
       setNativeSelected(!clear)
     },
@@ -131,12 +136,22 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
     const view = new EditorView(host.current, {
       state: controller.state,
       editable: () => !latest.current.readonlyContent && latest.current.ready && latest.current.active && latest.current.writing && !panelRef.current?.category,
-      attributes: { role: 'textbox', 'aria-label': 'Текстовый редактор', 'aria-multiline': 'true', spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off', 'data-placeholder': 'Пиши просто. Просто пиши.', ...(readonlyContent ? { 'aria-readonly': 'true', tabindex: '0' } : {}) },
+      attributes: state => ({
+        role: 'textbox', 'aria-label': 'Текстовый редактор', 'aria-multiline': 'true', spellcheck: 'true', autocorrect: 'off', autocapitalize: 'off', 'data-placeholder': 'Пиши просто. Просто пиши.',
+        // Only the initial empty paragraph is empty; typed spaces and hard breaks are content.
+        class: state.doc.childCount === 1 && state.doc.firstChild.type.name === 'paragraph' && state.doc.firstChild.content.size === 0 ? 'is-document-empty' : '',
+        ...(readonlyContent ? { 'aria-readonly': 'true', tabindex: '0' } : {}),
+      }),
       decorations: editorDecorations,
       transformPastedHTML: cleanPaste,
       dispatchTransaction(tr) {
         if (panelRef.current?.category) return
         if (latest.current.readonlyContent) {
+          const range = latest.current.visibleRange
+          if (range && tr.selectionSet) {
+            const clamp = position => Math.min(range.to, Math.max(range.from, position))
+            tr.setSelection(TextSelection.between(tr.doc.resolve(clamp(tr.selection.anchor)), tr.doc.resolve(clamp(tr.selection.head))))
+          }
           try { assertArchiveTransaction(tr, getSemanticMarkup(controller.state)) }
           catch (error) { report(error); view.updateState(controller.state); return }
         }
@@ -152,6 +167,13 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
       },
       handleDOMEvents: {
         keydown(_view, event) {
+          const range = latest.current.readonlyContent && latest.current.visibleRange
+          if (range && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+            event.preventDefault()
+            view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(range.from), view.state.doc.resolve(range.to))))
+            focusView(view)
+            return true
+          }
           // Readonly DOM never receives the ordinary text-editing keymap.
           if (latest.current.readonlyContent && (event.metaKey || event.ctrlKey) && !event.altKey) {
             const key = event.key.toLowerCase()
@@ -311,8 +333,15 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
 
   useLayoutEffect(() => {
     const view = viewRef.current
-    if (view) view.setProps({ decorations: editorDecorations })
-  }, [searchOccurrences, activeSearchId, readonlyContent, publications.records, highlightedPublicationId, tick, editorDecorations])
+    if (view) {
+      view.setProps({ decorations: editorDecorations })
+      const range = readonlyContent && props.visibleRange
+      if (range && (view.state.selection.from < range.from || view.state.selection.to > range.to)) {
+        const clamp = position => Math.min(range.to, Math.max(range.from, position))
+        view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(clamp(view.state.selection.anchor)), view.state.doc.resolve(clamp(view.state.selection.head)))))
+      }
+    }
+  }, [searchOccurrences, activeSearchId, readonlyContent, publications.records, highlightedPublicationId, tick, editorDecorations, props.visibleRange, props.contextRange])
 
   useEffect(() => {
     if (!panelOpen || !controller) return
@@ -453,6 +482,7 @@ const WritingEditor = forwardRef(function WritingEditor(props, ref) {
         applyValue={applyValue} cancelPanel={cancelPanel} />}
     </div>, document.body) : null}
     <SemanticRail view={runtime?.view} controller={controller} active={active} writing={writing} ready={ready}
+      visibleRange={props.visibleRange}
       metadataHost={metadataHost} scrollElement={scrollElement ?? runtime?.scroller} tick={tick} obstruction={dayOpen ? daySearchElement : null}
       publications={readonlyContent ? publications.records : undefined}
       highlightedPublicationId={highlightedPublicationId} onHighlightPublication={publicationId => {

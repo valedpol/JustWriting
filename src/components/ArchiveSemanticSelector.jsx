@@ -15,7 +15,7 @@ export default function ArchiveSemanticSelector({ page, index, selected, onSelec
         return <li key={id}><button type="button" className={`menu-item${selected === id ? ' is-active' : ''}`}
           aria-current={selected === id ? 'true' : undefined} disabled={busy} onClick={() => onSelect(id)}
           title={titles ? `Написано ${dateLabel(item.dayKey)}` : undefined} data-semantic-item={titles ? item.markupId : item.value}>
-          <span>{item.value}</span>{titles ? null : <span className="archive-semantic-count">{item.count}</span>}
+          <span>{item.value}</span>{titles ? <time className="archive-semantic-count" dateTime={item.dayKey}>{dateLabel(item.dayKey)}</time> : <span className="archive-semantic-count">{item.count}</span>}
         </button></li>
       })}</ul> : <p>{titles ? 'Названий пока нет.' : 'Тегов пока нет.'}</p>}
     </div>

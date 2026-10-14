@@ -517,10 +517,11 @@ test('App publication footer derives channel snapshot words, updates after delet
     const control = text => [...f.container.querySelectorAll('nav button')].find(node =>
       (node.querySelector('.owner-publication-channel-label')?.textContent ?? node.textContent) === text)
     assert.ok(footer().includes('Сохранено'), 'today save status remains unchanged')
-    await click(control('Мои тексты'))
+    await click(control('Архив и избранное'))
     await settle(() => f.container.querySelector('[data-text-id]'))
     assert.ok(footer().includes('Написано'))
-    await click(control('Публикации'))
+    await click(control('←'))
+    await click(control('Опубликованные тексты'))
     await settle(() => footer() === 'Опубликовано 3 слова')
     await click(control('Профиль'))
     assert.equal(footer(), 'Опубликовано 3 слова', 'clicking the current channel keeps the derived total')
@@ -533,15 +534,15 @@ test('App publication footer derives channel snapshot words, updates after delet
       await settle(() => footer() === `Опубликовано ${expected} ${expected === 0 ? 'слов' : 'слова'}` &&
         f.container.querySelector('.owner-publications').getAttribute('aria-busy') === 'false')
     }
-    assert.equal(control('Лента').getAttribute('aria-current'), 'true')
+    assert.equal(control('Лента').getAttribute('aria-current'), 'page')
     await click(control('Интернет')); await settle(() => footer() === 'Опубликовано 3 слова')
     await click(control('←'))
-    assert.ok(footer().includes('Написано'))
+    assert.ok(footer().includes('Сохранено'))
     await act(async () => { await f.repo.createPublications(f.userId, { source: f.source, channels: ['feed'] }) })
-    await click(control('Публикации')); await settle(() => footer() === 'Опубликовано 3 слова')
+    await click(control('Опубликованные тексты')); await settle(() => footer() === 'Опубликовано 3 слова')
     await click(control('Лента')); await settle(() => footer() === 'Опубликовано 3 слова')
     assert.deepEqual(sourceStores(await all()), before, 'summary writes no source or settings')
-    await click(control('←')); await click(control('←'))
+    await click(control('←'))
     assert.ok(footer().includes('Сохранено'), 'today keeps its existing save status after returning')
     assert.equal(footer().includes('Опубликовано'), false)
   } finally { await f.close() }
@@ -625,9 +626,9 @@ test('wheel over publication text stays native; right metadata wheel scrolls con
     await f.renderApp()
     const control = text => [...f.container.querySelectorAll('nav button')].find(node =>
       (node.querySelector('.owner-publication-channel-label')?.textContent ?? node.textContent) === text)
-    await click(control('Мои тексты')); await settle(() => f.container.querySelector('[data-text-id]'))
-    const archiveScroller = f.container.querySelector('.archive-scroll'), before = archiveScroller.scrollTop
-    await click(control('Публикации')); await settle(() => f.container.querySelector('.owner-publication-text'))
+    await click(control('Архив и избранное')); await settle(() => f.container.querySelector('[data-text-id]'))
+    await click(control('←')); await click(control('Опубликованные тексты')); await settle(() => f.container.querySelector('.owner-publication-text'))
+    const archiveScroller = f.container.querySelector('.my-texts .archive-scroll'), before = archiveScroller.scrollTop
     const frame = f.container.querySelector('.owner-publications')
     const column = frame.closest('.editor-column'), columnBefore = column.scrollTop
     const scroller = frame.querySelector('.owner-publications-scroll')
@@ -643,9 +644,11 @@ test('wheel over publication text stays native; right metadata wheel scrolls con
     assert.equal(frame.scrollTop, 0, 'all four borders belong to a non-scrolling shell')
     assert.equal(archiveScroller.scrollTop, before)
     await click(control('←'))
+    await click(control('Архив и избранное')); await settle(() => f.container.querySelector('[data-text-id]'))
+    const restoredScroller = f.container.querySelector('.my-texts .archive-scroll'), restoredBefore = restoredScroller.scrollTop
     const restored = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 10 })
     await act(async () => f.container.querySelector('.right-sidebar').dispatchEvent(restored))
-    assert.equal(archiveScroller.scrollTop, before + 10, 'return restores archive wheel routing')
+    assert.equal(restoredScroller.scrollTop, restoredBefore + 10, 'return restores archive wheel routing')
   } finally { await f.close() }
 })
 

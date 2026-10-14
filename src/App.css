@@ -477,3 +477,7 @@
 .app-shell .side-menu button.menu-item:not(.is-active):not(:disabled):not([aria-disabled="true"]):hover {
   background-color: #f4f4f4;
 }
+
+/* Logical groups use explicit spacing, independent of item positions. */
+.screen-interface .main-navigation .menu-item { margin-top: 0; }
+.screen-interface .side-menu .navigation-group-start { margin-top: calc(var(--navigation-group-gap) - var(--navigation-item-gap)); }

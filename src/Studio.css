@@ -8,6 +8,15 @@
 .studio-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; padding: 28px 28px 20px; font: 400 20px/1.55 Georgia, 'Times New Roman', serif; color: #171717; overflow-wrap: anywhere; }
 .studio-content p { margin: 0; white-space: pre-line; }
 .studio-content p + p { margin-top: 0.7lh; }
+.studio-content h1, .studio-content h2 { font-family: inherit; font-weight: 600; line-height: 1.25; }
+.studio-content h1 { font-size: 1.7em; margin: 1.6lh 0 0.9lh; }
+.studio-content h2 { font-size: 1.2em; margin: 1.5lh 0 0.7lh; }
+.studio-content > :first-child { margin-top: 0; }
+.studio-content ul, .studio-content ol { margin: 0.7lh 0; padding-left: 1.4em; }
+.studio-content li + li { margin-top: 0.25lh; }
+.studio-content code { font: 0.85em/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; background: #f5f5f5; padding: 0.1em 0.25em; border-radius: 2px; }
+.studio-content pre { overflow-x: auto; margin: 0.7lh 0; }
+.studio-content pre code { display: block; padding: 0.5em; white-space: pre; }
 @media (max-width: 900px) {
   .studio-content { padding-inline: 18px; }
 }

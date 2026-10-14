@@ -54,7 +54,7 @@ SHA-256, version, origin, counts and UUID verification results are stored under
 `just-writing-last-verified-backup-v1` in origin-local localStorage. No file or
 backup payload is stored there, and no working IndexedDB write/schema change is
 needed. The receipt survives reloads and browser restarts in the same profile;
-clearing site data removes it. Research does not consume it yet.
+clearing site data removes it. Research uses a separate cumulative creation counter, not this verification receipt.
 
 ## Console checkpoint procedure
 
@@ -154,3 +154,20 @@ Tests use isolated UUID names and fake IndexedDB only. Running this code
 in the application will request schema v6 through the normal database open path;
 the implementation and automated checks do not launch a working browser upgrade.
 Existing publications stay readable as snapshots without guessed live anchors.
+
+### Created backup count
+
+Research displays the cumulative number of files successfully created and handed
+to the browser download mechanism through Settings. Each successful create/download
+adds one; verification (including repeated checks), failed creation and failed
+download dispatch do not change it. Cancelling verification leaves a completed
+creation counted. Browser download dispatch cannot confirm whether the user
+actually saved the file or cancelled the browser save dialog.
+
+The counter is separate local Account metadata under
+`just-writing-created-backup-count-v1` in localStorage. It survives application
+restarts in the same browser profile, is not derived from disk files, and is not
+part of the working database or backup format. Clearing site data removes it.
+No past total can be reconstructed from the last verification receipt; the
+counter starts at zero when absent. Storage failures are reported without claiming
+that the counter was saved.

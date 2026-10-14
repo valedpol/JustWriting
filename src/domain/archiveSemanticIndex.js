@@ -40,7 +40,7 @@ export function archiveSemanticSelection(records, index, page, selected) {
     ? index.titles.find(item => item.id === selected) ?? index.titles[0]
     : index.tags.find(item => item.value === selected) ?? index.tags[0]
   if (!item) return { selected: null, occurrences: [], records: [] }
-  const occurrences = page === 'title' ? index.titles.filter(title => title.value === item.value) : item.occurrences
+  const occurrences = page === 'title' ? [item] : item.occurrences
   const ids = new Set(occurrences.map(item => item.textId))
   return { selected: page === 'title' ? item.id : item.value, occurrences, records: records.filter(record => ids.has(record.textId)) }
 }

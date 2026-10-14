@@ -10,7 +10,7 @@
 .writing-editor .ProseMirror strong { font-weight: bold; }
 .writing-editor .ProseMirror em { font-style: italic; }
 .writing-editor .ProseMirror u { text-decoration: underline; }
-.writing-editor .ProseMirror > p:only-child:has(> br:only-child)::before { content: 'Пиши просто. Просто пиши.'; color: #9b9b9b; float: left; height: 0; pointer-events: none; }
+.writing-editor .ProseMirror.is-document-empty > p:first-child::before { content: 'Пиши просто. Просто пиши.'; color: #9b9b9b; float: left; height: 0; pointer-events: none; }
 .ProseMirror-selectednode { outline: 1px solid #aaa; }
 .screen-interface .writing-editor { cursor: pointer; }
 /* Only today's interface owns a fixed viewport; the text scrolls inside its frame. */

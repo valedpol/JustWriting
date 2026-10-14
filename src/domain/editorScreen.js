@@ -4,7 +4,7 @@ export const SCREEN_MODES = {
   wide: 'writing-wide',
 }
 
-const sections = ['today', 'archive', 'settings', 'research', 'feed', 'studio']
+const sections = ['today', 'archive', 'publications', 'settings', 'research', 'feed', 'studio']
 const sectionStorageKey = 'just-writing-current-section-v1'
 
 export const initialScreen = { section: 'today', screenMode: SCREEN_MODES.interface }

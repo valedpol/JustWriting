@@ -3,7 +3,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
-import { act, createElement, createRef } from 'react'
+import { act, createElement, createRef, StrictMode } from 'react'
 
 const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true })
 for (const key of ['window', 'document', 'Node', 'HTMLElement', 'DOMParser', 'MutationObserver', 'getComputedStyle']) globalThis[key] = dom.window[key]
@@ -25,11 +25,11 @@ const server = await createServer({ server: { middlewareMode: true, hmr: false, 
 const { default: WritingEditor } = await server.ssrLoadModule('/src/components/WritingEditor.jsx')
 const { openWritingController } = await server.ssrLoadModule('/src/editor/writingController.js')
 const { getSemanticMarkup, confirmSlashMarkup, assignSelectionMarkup } = await server.ssrLoadModule('/src/editor/semanticHistory.js')
-const { TextSelection } = await import('@tiptap/pm/state')
+const { AllSelection, TextSelection } = await import('@tiptap/pm/state')
 const { undo, redo } = await import('@tiptap/pm/history')
 after(async () => { await server.close(); dom.window.close() })
 
-test('left title/tag selectors show standard collapsed archive cards, reread exact readonly ranges and never write stores', async () => {
+test('titles immediately show exact readonly fragments with optional day context; tag cards, rereads and navigation never write stores', async () => {
   const { default: MyTexts } = await server.ssrLoadModule('/src/MyTexts.jsx')
   const { transaction } = await server.ssrLoadModule('/src/storage/database.js')
   const userId = crypto.randomUUID()
@@ -60,7 +60,7 @@ test('left title/tag selectors show standard collapsed archive cards, reread exa
   }
   const originalRects = dom.window.Range.prototype.getClientRects
   dom.window.Range.prototype.getClientRects = function () {
-    const top = this.startContainer.textContent?.includes('Конец дня') ? 800 : 200
+    const top = (this.startContainer.parentElement?.closest('.archive-title-context') ? 800 : 200) - (container.querySelector('.archive-scroll')?.scrollTop ?? 0)
     return [{ ...rect, top, bottom: top + 20 }]
   }
   try {
@@ -86,31 +86,51 @@ test('left title/tag selectors show standard collapsed archive cards, reread exa
     const ids = () => [...container.querySelectorAll('[data-text-id]')].map(node => node.dataset.textId)
     const entry = id => container.querySelector(`[data-text-id="${id}"] .archive-preview-button`)
     const choose = id => click(navigation.querySelector(`[data-semantic-item="${id}"]`))
+    const visibleText = () => {
+      const node = container.querySelector('.ProseMirror')?.cloneNode(true)
+      if (!node) return null
+      node.querySelectorAll('.archive-title-hidden').forEach(node => node.remove())
+      node.querySelectorAll('br').forEach(node => node.replaceWith('\n'))
+      return node.textContent
+    }
+    const context = label => click([...container.querySelectorAll('.archive-title-header button')].find(node => node.textContent === label))
     await settle(() => items().length === 4 && !items()[0].disabled)
-    assert.deepEqual(items().map(node => node.textContent), ['Азбука', 'Ворона', 'Ворона', 'Ясень'])
-    assert.deepEqual(items().filter(node => node.textContent === 'Ворона').map(node => node.title), ['Написано 02.10.2026', 'Написано 25.09.2025'])
-    assert.equal(navigation.querySelector('time'), null, 'dates do not consume list width')
+    assert.deepEqual(items().map(node => node.firstElementChild.textContent), ['Азбука', 'Ворона', 'Ворона', 'Ясень'])
+    assert.deepEqual(items().filter(node => node.firstElementChild.textContent === 'Ворона').map(node => node.querySelector('time').textContent), ['02.10.2026', '25.09.2025'])
     assert.equal(items()[0].getAttribute('aria-current'), 'true', 'first alphabetic title is selected automatically')
     assert.deepEqual(ids(), [rows[1].textId])
-    assert.equal(container.querySelector('.saved-text'), null, 'initial matching card is collapsed')
+    await settle(() => visibleText() === 'Азбука')
+    assert.equal(container.querySelector('.archive-preview-button'), null, 'named text is immediately open')
     const heading = navigation.querySelector('.archive-semantic-selector-heading')
     assert.equal(heading.firstElementChild.textContent, '←')
     assert.equal(heading.lastElementChild.textContent, 'Названия')
     assert.equal(navigation.querySelector('.archive-semantic-list-scroll').contains(heading), false)
     assert.equal(navigation.querySelectorAll('button').length, 5, 'one header back button, no bottom back item')
     await choose('a')
-    await settle(() => !items()[0].disabled && ids().length === 2)
-    assert.deepEqual(ids(), [rows[0].textId, rows[2].textId], 'same title matches several days in ordinary archive order')
-    assert.equal(container.querySelector('.saved-text'), null)
-    await click(entry(rows[0].textId))
-    await settle(() => window.getSelection().toString() === 'Конец дня')
+    await settle(() => !items()[0].disabled && visibleText() === 'Конец дня')
+    assert.deepEqual(ids(), [rows[0].textId], 'a duplicate name selects its exact dated assignment')
     assert.equal(container.querySelector('[aria-label="Снять выбранный период"]'), null)
     assert.equal(container.querySelector('.archive-search-criterion'), null)
-    assert.ok(document.activeElement.closest(`[data-text-id="${rows[0].textId}"]`))
-    assert.equal(document.activeElement.getAttribute('contenteditable'), 'false')
-    assert.ok(area.scrollTop > 0, 'standard archive expansion locates the matching late range')
-    await click(container.querySelector('.archive-record-info'))
-    assert.equal(container.querySelector('.saved-text'), null, 'standard archive control collapses the card again')
+    assert.equal(container.querySelector('.ProseMirror').getAttribute('contenteditable'), 'false')
+    await context('Весь день')
+    await settle(() => container.querySelector('.archive-title-context') && !items()[0].disabled)
+    assert.ok(visibleText().includes('Вступление'))
+    assert.equal(container.querySelector('.archive-title-context').textContent, 'Конец дня')
+    assert.ok(area.scrollTop > 0, 'context is positioned at the named fragment, not at the day start')
+    await context('Только текст')
+    await settle(() => visibleText() === 'Конец дня' && !items()[0].disabled)
+    assert.equal(area.scrollTop, 0)
+    area.scrollTop = 140
+    await context('Весь день')
+    await settle(() => container.querySelector('.archive-title-context') && !items()[0].disabled)
+    assert.equal(area.scrollTop, 740, 'negative viewport offset is preserved when the title start is above the visible area')
+    await context('Только текст')
+    await settle(() => visibleText() === 'Конец дня' && !items()[0].disabled)
+    assert.equal(area.scrollTop, 140, 'return retains the prior reading position instead of returning to the title start')
+    await choose('c')
+    await settle(() => visibleText() === 'Другой' && !items()[0].disabled)
+    assert.deepEqual(ids(), [rows[2].textId])
+    assert.equal(container.querySelector('.archive-title-context'), null, 'switching titles resets context mode')
     await click(nav('←'))
     await settle(() => nav('Теги') && !nav('Теги').disabled)
     assert.ok(container.querySelector('[aria-label="Снять выбранный период"]'), 'back restores the previous period')
@@ -135,22 +155,23 @@ test('left title/tag selectors show standard collapsed archive cards, reread exa
     await click(nav('Названия'))
     await settle(() => items().length === 4 && !items()[0].disabled)
     await choose('a')
-    await settle(() => !items()[0].disabled && ids().length === 2)
-    // Expansion rereads the current source before opening the standard editor.
+    await settle(() => !items()[0].disabled && visibleText() === 'Конец дня')
+    // Context toggles reread the source before showing a different presentation.
     const updated = { ...rows[0], revision: 2, content: 'Новый нужный фрагмент', semanticMarkup: [semantic('a', 'title', 'Ворона', 7, 13)] }
     await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put(updated))
     const changed = await snapshot()
-    await click(entry(rows[0].textId))
-    await settle(() => window.getSelection().toString() === 'нужный')
-    assert.equal(document.activeElement.textContent, updated.content)
-    assert.equal(document.activeElement.getAttribute('contenteditable'), 'false')
+    await context('Весь день')
+    await settle(() => visibleText() === updated.content && !items()[0].disabled)
+    assert.equal(container.querySelector('.archive-title-context').textContent, 'нужный')
+    assert.equal(container.querySelector('.ProseMirror').getAttribute('contenteditable'), 'false')
     assert.deepEqual(await snapshot(), changed)
-    await click(container.querySelector('.archive-record-info'))
+    await context('Только текст')
+    await settle(() => visibleText() === 'нужный' && !items()[0].disabled)
     await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').put({ ...updated, revision: 3, semanticMarkup: [] }))
     const removed = await snapshot()
-    await click(entry(rows[0].textId))
+    await context('Весь день')
     await settle(() => container.querySelector('[role=alert]'))
-    assert.equal(container.querySelector('.saved-text'), null, 'removed assignments never navigate to a stale range')
+    await settle(() => visibleText() === 'Азбука')
     assert.deepEqual(ids(), [rows[1].textId], 'a removed choice falls back to the first available title')
     assert.deepEqual(await snapshot(), removed)
     await act(async () => root.render(null))
@@ -158,15 +179,46 @@ test('left title/tag selectors show standard collapsed archive cards, reread exa
     await settle(() => nav('Названия') && !nav('Названия').disabled)
     await click(nav('Названия'))
     await settle(() => items().length === 2 && !items()[0].disabled)
-    assert.deepEqual(items().map(node => node.textContent), ['Азбука', 'Ворона'])
+    assert.deepEqual(items().map(node => node.firstElementChild.textContent), ['Азбука', 'Ворона'])
     assert.equal(items()[0].getAttribute('aria-current'), 'true')
     assert.deepEqual(ids(), [rows[1].textId])
-    assert.equal(container.querySelector('.saved-text'), null)
+    await settle(() => visibleText() === 'Азбука')
     assert.deepEqual(await snapshot(), removed)
   } finally {
     dom.window.Range.prototype.getClientRects = originalRects
     await act(async () => root.unmount()); container.remove(); sidebar.remove(); navigation.remove()
   }
+})
+
+test('unfinished titles never invent a fragment or show the whole day until explicitly requested', async () => {
+  const { default: MyTexts } = await server.ssrLoadModule('/src/MyTexts.jsx')
+  const { transaction } = await server.ssrLoadModule('/src/storage/database.js')
+  const { loadText } = await server.ssrLoadModule('/src/storage/textRepository.js')
+  const record = { textId: crypto.randomUUID(), userId: crypto.randomUUID(), dayKey: '2026-10-01', revision: 1, content: 'Контекст без заданных границ.',
+    semanticMarkup: [{ id: 'open', valueId: 'open-value', value: 'Начало', kind: 'title', source: 'slash', direction: 'forward', anchor: 1, range: null }] }
+  await transaction(['texts'], 'readwrite', tx => tx.objectStore('texts').add(record))
+  const container = document.createElement('div'), sidebar = document.createElement('aside'); document.body.append(container, sidebar)
+  const root = createRoot(container)
+  const settle = async predicate => {
+    for (let i = 0; i < 80 && !predicate(); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)))
+    assert.ok(predicate(), container.textContent)
+  }
+  const button = label => [...container.querySelectorAll('button')].find(node => node.textContent === label)
+  try {
+    await act(async () => root.render(createElement(MyTexts, { userId: record.userId, flush: async () => {}, onTotalWords() {}, metadataHost: sidebar })))
+    await settle(() => button('Названия') && !button('Названия').disabled)
+    await click(button('Названия'))
+    await settle(() => container.querySelector('.archive-title-unresolved'))
+    assert.equal(container.querySelector('.saved-text'), null)
+    assert.equal(sidebar.querySelector('[data-archive-date]').disabled, true)
+    await click(button('Весь день'))
+    await settle(() => container.querySelector('.ProseMirror') && button('Только текст') && !button('Только текст').disabled)
+    assert.equal(container.querySelector('.ProseMirror').textContent, record.content)
+    await click(button('Только текст'))
+    await settle(() => container.querySelector('.archive-title-unresolved'))
+    assert.equal(container.querySelector('.saved-text'), null)
+    assert.deepEqual(await loadText(record.userId, record.dayKey), record)
+  } finally { await act(async () => root.unmount()); container.remove(); sidebar.remove() }
 })
 
 test('readonly archive removes individual assignments and the last one persistently without changing historical fields', async () => {
@@ -244,11 +296,65 @@ async function fixture(options = {}) {
   const ref = createRef()
   const root = createRoot(container)
   const render = async (writing = true, active = true) => act(async () => {
-    root.render(createElement(WritingEditor, { ref, controller, writing, active, ready: true, metadataHost: sidebar, scrollElement: options.scrollElement, searchOccurrences: options.searchOccurrences, activeSearchId: options.activeSearchId, onActivate() {}, readonlyContent: options.readonlyContent ?? false }))
+    root.render(createElement(WritingEditor, { ref, controller, writing, active, ready: true, metadataHost: sidebar, scrollElement: options.scrollElement, searchOccurrences: options.searchOccurrences, activeSearchId: options.activeSearchId, visibleRange: options.visibleRange, contextRange: options.contextRange, onActivate() {}, readonlyContent: options.readonlyContent ?? false }))
   })
   await render()
   return { controller, container, sidebar, ref, render, async close() { await act(async () => root.unmount()); container.remove(); sidebar.remove() } }
 }
+
+test('readonly title view preserves multi-paragraph B/I/U and source coordinates; Select All stays inside the visible range', async () => {
+  const { createArchiveController } = await server.ssrLoadModule('/src/editor/archiveController.js')
+  const { parseDocument, documentToContent } = await server.ssrLoadModule('/src/editor/document.js')
+  const first = 'Первый абзац. '.repeat(60), second = 'Второй абзац. '.repeat(40)
+  const document = { type: 'doc', content: [
+    { type: 'paragraph', content: [{ type: 'text', text: 'До. ' }, { type: 'text', text: first, marks: [{ type: 'bold' }] }] },
+    { type: 'paragraph', content: [{ type: 'text', text: second, marks: [{ type: 'italic' }, { type: 'underline' }] }, { type: 'text', text: ' После.' }] },
+    { type: 'paragraph', content: [{ type: 'text', text: 'Хвост дня' }] },
+  ] }
+  const doc = parseDocument(document), range = { from: 5, to: doc.child(0).nodeSize + 1 + second.length }
+  const record = { userId: crypto.randomUUID(), textId: crypto.randomUUID(), dayKey: '2026-10-01', revision: 1,
+    contentFormat: 'tiptap-json', contentVersion: 1, document, content: documentToContent(document), semanticMarkup: [] }
+  let writes = 0
+  const controller = createArchiveController(record, { save: async () => { writes++; assert.fail('view changes must not save a projected document') } })
+  const options = { controller, readonlyContent: true, visibleRange: range }
+  const f = await fixture(options)
+  const view = f.ref.current.instance
+  const visible = () => {
+    const clone = view.dom.cloneNode(true)
+    clone.querySelectorAll('.archive-title-hidden').forEach(node => node.remove())
+    return clone
+  }
+  try {
+    assert.equal(visible().textContent, first + second)
+    assert.equal(visible().querySelectorAll('p').length, 2)
+    assert.equal(visible().querySelector('strong').textContent, first)
+    assert.equal(visible().querySelector('em u').textContent, second)
+    assert.deepEqual(view.state.doc.toJSON(), document, 'the editor keeps the full original source, not a copied fragment')
+    await act(async () => {
+      view.focus()
+      view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    assert.equal(controller.state.selection.from, range.from)
+    assert.equal(controller.state.selection.to, range.to)
+    await act(async () => { view.dispatch(view.state.tr.insertText('Запрещено', range.from)); await controller.flush() })
+    assert.deepEqual(view.state.doc.toJSON(), document, 'readonly protection still rejects character edits')
+    options.visibleRange = null; options.contextRange = range
+    await f.render()
+    assert.equal(visible().textContent, doc.textContent)
+    assert.equal(view.dom.querySelectorAll('.archive-title-context').length, 2)
+    options.visibleRange = range; options.contextRange = null
+    await f.render()
+    assert.equal(visible().textContent, first + second)
+    options.visibleRange = { from: 0, to: doc.content.size }
+    await f.render()
+    await act(async () => f.ref.current.toggleSelectAll())
+    assert.equal(controller.state.selection.empty, false)
+    await act(async () => f.ref.current.toggleSelectAll())
+    assert.equal(controller.state.selection.empty, true, 'whole-document title ranges with structural bounds can also clear selection')
+    assert.deepEqual(controller.snapshot.record, record)
+    assert.equal(writes, 0)
+  } finally { await f.close() }
+})
 
 test('archive dates select only day text; collapse zones and collapse-all preserve anchor without writes', async () => {
   const { default: MyTexts } = await server.ssrLoadModule('/src/MyTexts.jsx')
@@ -751,6 +857,115 @@ test('selection title and explicit second slash boundary are edited through the 
   await f.close()
 })
 
+test('day phrase hook remains stable through rerenders/remounts and rotates only at the JW day boundary; mount is not auth', async () => {
+  const { useDayPhrase } = await server.ssrLoadModule('/src/hooks/useDayPhrase.js')
+  const { calculateUserDay } = await server.ssrLoadModule('/src/domain/writingDay.js')
+  const profile = { userId: 'hook-owner', timeZone: 'Europe/Moscow', dayStartMinutes: 240 }
+  const boundary = Date.parse('2026-10-08T01:00:00Z')
+  const calls = [], saved = new Map()
+  const api = {
+    async loadDayPhrase(profile, now) {
+      const { dayKey } = calculateUserDay({ ...profile, now })
+      calls.push(dayKey)
+      if (!saved.has(dayKey)) saved.set(dayKey, `Фраза ${saved.size + 1}`)
+      return saved.get(dayKey)
+    },
+    chooseAfterAuthentication() { assert.fail('there is no real auth hook on local app mount') },
+  }
+  function Harness({ now, mode, userProfile }) {
+    return createElement('p', { 'data-mode': mode }, useDayPhrase(userProfile, now, api))
+  }
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  const render = async (now, mode = 'interface', userProfile = profile) => act(async () => root.render(createElement(StrictMode, null, createElement(Harness, { now, mode, userProfile }))))
+  try {
+    await render(boundary - 2000, 'interface', null)
+    await render(boundary - 2000, 'interface', { userId: profile.userId })
+    assert.equal(container.textContent, '')
+    assert.equal(calls.length, 0, 'wait for the actual day policy; never guess timezone for incomplete profiles')
+    await render(boundary - 2000)
+    assert.equal(container.textContent, 'Фраза 1')
+    const initialCalls = calls.length
+    await render(boundary - 1000, 'writing')
+    await render(boundary - 1, 'archive')
+    assert.equal(container.textContent, 'Фраза 1')
+    assert.equal(calls.length, initialCalls, 'ordinary renders/clock ticks/modes do not request a new choice')
+    await act(async () => root.render(null))
+    await render(boundary - 1)
+    assert.equal(container.textContent, 'Фраза 1', 'remount/reopening retains the persisted selection')
+    await render(boundary)
+    assert.equal(container.textContent, 'Фраза 2')
+    assert.equal(saved.size, 2)
+  } finally { await act(async () => root.unmount()); container.remove() }
+})
+
+test('prompt follows editor state through typing, paste, line breaks and deleting all content', async () => {
+  const f = await fixture()
+  const view = f.ref.current.instance
+  const isEmpty = () => view.dom.classList.contains('is-document-empty')
+  const clear = async () => act(async () => {
+    view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)).deleteSelection())
+    await f.controller.flush()
+  })
+  try {
+    assert.equal(isEmpty(), true, 'new empty document shows the prompt')
+    await act(async () => { view.dispatch(view.state.tr.insertText('Я', 1)); await f.controller.flush() })
+    assert.equal(isEmpty(), false, 'first letter hides the prompt')
+    await clear()
+    assert.equal(isEmpty(), true, 'deleting all content restores the prompt')
+    await act(async () => { view.dispatch(view.state.tr.insertText(' ', 1)); await f.controller.flush() })
+    assert.equal(isEmpty(), false, 'a typed space is user content')
+    await clear()
+    for (const html of ['<p>Начало<br>Конец</p>', '<p>Первый</p><p>Второй</p>']) {
+      await act(async () => { assert.equal(view.pasteHTML(html), true); await f.controller.flush() })
+      assert.equal(isEmpty(), false, `pasted content hides the prompt: ${html}`)
+      if (html.includes('<br>')) {
+        assert.ok(view.dom.querySelector('p:only-child > br:only-child'), 'reproduces the old false-empty DOM structure')
+        assert.equal(view.state.doc.textContent, 'НачалоКонец')
+      }
+      await clear()
+      assert.equal(isEmpty(), true)
+    }
+    for (const shiftKey of [false, true]) {
+      await act(async () => {
+        view.focus()
+        view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, shiftKey, bubbles: true, cancelable: true }))
+        await f.controller.flush()
+      })
+      assert.equal(isEmpty(), false, `${shiftKey ? 'Shift+Enter' : 'Enter'} is document content`)
+      await clear()
+      assert.equal(isEmpty(), true)
+    }
+  } finally { await f.close() }
+})
+
+test('prompt is derived again after reopening empty and nonempty saved days', async () => {
+  const profile = { userId: crypto.randomUUID(), timeZone: 'UTC', dayStartMinutes: 0, dayPolicyVersion: 1 }
+  const open = async () => fixture({ controller: await openWritingController({ profile }) })
+  let f = await open()
+  try {
+    assert.ok(f.ref.current.instance.dom.classList.contains('is-document-empty'))
+    await act(async () => {
+      f.ref.current.instance.pasteHTML('<p>Сохранённый<br>текст</p>')
+      await f.controller.flush()
+    })
+    const savedDoc = f.controller.state.doc.toJSON()
+    await f.close()
+    f = await open()
+    assert.deepEqual(f.controller.state.doc.toJSON(), savedDoc)
+    assert.equal(f.ref.current.instance.dom.classList.contains('is-document-empty'), false)
+    await act(async () => {
+      const view = f.ref.current.instance
+      view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)).deleteSelection())
+      await f.controller.flush()
+    })
+    await f.close()
+    f = await open()
+    assert.equal(f.controller.state.doc.textContent, '')
+    assert.ok(f.ref.current.instance.dom.classList.contains('is-document-empty'))
+  } finally { await f.close() }
+})
+
 test('IME DOM event bridge waits for the final transaction and ignores repeated completion notifications', async () => {
   const f = await fixture()
   const view = f.ref.current.instance
@@ -762,6 +977,7 @@ test('IME DOM event bridge waits for the final transaction and ignores repeated 
   })
   assert.equal(f.controller.composing, true)
   assert.equal(f.controller.snapshot.record, null)
+  assert.equal(view.dom.classList.contains('is-document-empty'), false, 'provisional IME text already hides the prompt')
   await act(async () => {
     view.dom.dispatchEvent(new dom.window.CompositionEvent('compositionend', { bubbles: true, data: '你' }))
     view.dom.dispatchEvent(new dom.window.InputEvent('input', { bubbles: true, inputType: 'insertFromComposition', data: '你' }))
@@ -769,6 +985,7 @@ test('IME DOM event bridge waits for the final transaction and ignores repeated 
     await f.controller.flush()
   })
   assert.equal(f.controller.snapshot.text, '你')
+  assert.equal(view.dom.classList.contains('is-document-empty'), false)
   const revision = f.controller.snapshot.record.revision
   await act(async () => {
     view.dom.dispatchEvent(new dom.window.CompositionEvent('compositionend', { bubbles: true, data: '你' }))
@@ -818,6 +1035,10 @@ test('main JW screen enters writing, keeps the editor across standard/wide and o
   try {
     await act(async () => root.render(createElement(App)))
     await settle(() => container.querySelector('.ProseMirror'))
+    await settle(() => container.querySelector('.quote-box p')?.textContent)
+    const dayPhrase = container.querySelector('.quote-box p').textContent
+    const { dayPhrases } = await server.ssrLoadModule('/src/storage/dayPhraseRepository.js')
+    assert.ok(dayPhrases.includes(dayPhrase))
     const editor = container.querySelector('.ProseMirror')
     assert.equal(editor.getAttribute('contenteditable'), 'false')
     await click(container.querySelector('.meta-countdown'))
@@ -860,22 +1081,19 @@ test('main JW screen enters writing, keeps the editor across standard/wide and o
     await click(container.querySelector('button[aria-label="Перейти в широкий режим"]'))
     await settle(() => container.querySelector('.screen-writing-wide'))
     assert.equal(container.querySelector('.ProseMirror'), editor)
+    assert.equal(container.querySelector('.quote-box p').textContent, dayPhrase)
     await click(container.querySelector('button[aria-label="Перейти в стандартный режим"]'))
     assert.equal(container.querySelector('.ProseMirror'), editor)
-    await click(button('Мои тексты'))
+    await click(button('Архив и избранное'))
     await settle(() => container.querySelector('.text-preview'))
+    assert.equal(container.querySelector('.quote-box p').textContent, dayPhrase, 'section navigation retains the day phrase')
     assert.equal(container.querySelector('.today-editor-shell').hidden, true)
-    const localNavigation = container.querySelector('nav[aria-label="Мои тексты"]')
+    const localNavigation = container.querySelector('nav[aria-label="Архив и избранное"]')
     assert.ok(localNavigation)
-    assert.equal(localNavigation.querySelector('span.menu-item').textContent, 'Мои тексты')
+    assert.equal(localNavigation.querySelector('span.menu-item').textContent, 'Архив и избранное')
     assert.equal(container.querySelector('nav[aria-label="Главное меню"]'), null)
-    assert.deepEqual([...localNavigation.querySelectorAll('button')].map(node => node.textContent.trim()), ['Поиск', 'Названия', 'Теги', 'Публикации', '←'])
-    for (const tool of localNavigation.querySelectorAll('.research-local-children button:disabled')) {
-      assert.equal(tool.disabled, true)
-      await click(tool)
-      assert.equal(container.querySelector('nav[aria-label="Мои тексты"]'), localNavigation)
-    }
-    assert.ok(localNavigation.querySelector('.my-texts-publications'))
+    assert.deepEqual([...localNavigation.querySelectorAll('button')].map(node => node.textContent.trim()), ['Поиск по архиву', 'Названия', 'Теги', 'Коллекция', '←'])
+    assert.equal([...localNavigation.querySelectorAll('button')].find(n => n.textContent === 'Коллекция').disabled, true)
     assert.ok(container.querySelector('.archive-calendar-heading'), 'calendar remains in the archive at its existing location')
     await click(container.querySelector('.text-preview').closest('button'))
     await settle(() => container.querySelector('.saved-text strong'))
@@ -883,7 +1101,7 @@ test('main JW screen enters writing, keeps the editor across standard/wide and o
     assert.equal(container.querySelector('.saved-text [contenteditable=true]'), null)
     assert.ok(container.querySelector('.saved-text [contenteditable=false]'))
     await click(container.querySelector('[aria-label="Выйти из Моих текстов к Тексту сегодня"]'))
-    assert.equal(container.querySelector('nav[aria-label="Мои тексты"]'), null)
+    assert.equal(container.querySelector('nav[aria-label="Архив и избранное"]'), null)
     assert.ok(container.querySelector('nav[aria-label="Главное меню"]'))
     assert.equal(container.querySelector('.ProseMirror'), editor)
     assert.equal(editor.getAttribute('contenteditable'), 'false')

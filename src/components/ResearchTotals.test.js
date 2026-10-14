@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
 import { createLastVerifiedBackupStore } from '../backup/lastVerifiedBackup.js'
+import { createCreatedBackupCountStore } from '../backup/createdBackupCount.js'
 
 const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error' })
 const { default: ResearchTotals } = await server.ssrLoadModule('/src/components/ResearchTotals.jsx')
@@ -28,14 +29,17 @@ test('six totals preserve original order and pluralize semantic and backup count
   }
 })
 
-test('Research backup indicator uses the Account receipt; unverified downloads do not count', () => {
+test('Research counts creations independently of verification receipts', () => {
   const entries = new Map()
   const storage = { getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) }
   const account = createLastVerifiedBackupStore(storage)
-  const research = createLastVerifiedBackupStore(storage)
-  assert.equal(totals(0, research.read() ? 1 : 0)[5][0], '0')
+  const research = createCreatedBackupCountStore(storage)
+  assert.equal(totals(0, research.read())[5][0], '0')
   assert.throws(() => account.save({ restoreVerified: false }))
-  assert.equal(totals(0, research.read() ? 1 : 0)[5][0], '0')
+  assert.equal(totals(0, research.read())[5][0], '0')
   account.save({ capturedAt: Date.now(), counts: { texts: 33 }, restoreVerified: true, isolatedRestoreDeleted: true })
-  assert.equal(totals(0, research.read() ? 1 : 0)[5][0], '1')
+  assert.equal(totals(0, research.read())[5][0], '0')
+  research.increment()
+  research.increment()
+  assert.equal(totals(0, research.read())[5][0], '2')
 })

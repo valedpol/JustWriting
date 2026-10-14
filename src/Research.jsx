@@ -9,10 +9,10 @@ import WritingChart from './components/WritingChart.jsx'
 import ArchiveCalendar from './components/ArchiveCalendar.jsx'
 import { periodLabel } from './domain/calendarPeriod.js'
 import ResearchTotals from './components/ResearchTotals.jsx'
-import { createLastVerifiedBackupStore } from './backup/lastVerifiedBackup.js'
+import { createCreatedBackupCountStore } from './backup/createdBackupCount.js'
 
 export default function Research({ userId, flush, view = 'statistics' }) {
-  const [backupStore] = useState(() => createLastVerifiedBackupStore())
+  const [backupStore] = useState(() => createCreatedBackupCountStore())
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(null)
@@ -29,7 +29,7 @@ export default function Research({ userId, flush, view = 'statistics' }) {
           loadResearch(userId),
           Promise.all(['profile', 'feed'].map(async channel => [channel, (await listOwnPublications(userId, channel)).length])).then(Object.fromEntries),
         ])
-        if (!stopped && snapshot.profile) { setData({ ...researchData(snapshot, Date.now()), publicationCounts, backupCount: backupStore.read() ? 1 : 0, calendarKey: localDayKey(Date.now(), snapshot.profile.timeZone) }); setError('') }
+        if (!stopped && snapshot.profile) { setData({ ...researchData(snapshot, Date.now()), publicationCounts, backupCount: backupStore.read(), calendarKey: localDayKey(Date.now(), snapshot.profile.timeZone) }); setError('') }
       } catch (failure) { if (!stopped) setError(failure.message) }
       finally { reading = false }
     }

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { act, createElement } from 'react'
 import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
-import { createLastVerifiedBackupStore } from './backup/lastVerifiedBackup.js'
+import { createCreatedBackupCountStore } from './backup/createdBackupCount.js'
 
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true, url: 'https://research.test' })
 for (const key of ['window', 'document', 'HTMLElement']) globalThis[key] = dom.window[key]
@@ -30,10 +30,9 @@ const { default: Research } = await server.ssrLoadModule('/src/Research.jsx')
 after(async () => { delete globalThis.__researchRenderLoad; await server.close(); dom.window.close() })
 
 test('full Research page renders after asynchronous loading, with word caption, six totals and navigation', async () => {
-  for (const backupCount of [0, 1]) {
+  for (const backupCount of [0, 1, 3]) {
     dom.window.localStorage.clear()
-    if (backupCount) createLastVerifiedBackupStore().save({ capturedAt: Date.now(), counts: { texts: 1 },
-      restoreVerified: true, isolatedRestoreDeleted: true })
+    for (let i = 0; i < backupCount; i++) createCreatedBackupCountStore().increment()
     const dayKey = new Date().toISOString().slice(0, 10)
     const snapshot = { profile: { userId: 'u', timeZone: 'UTC', dayStartMinutes: 0 },
       days: [{ userId: 'u', userDayId: 'day', dayKey }],

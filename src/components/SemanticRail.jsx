@@ -13,7 +13,7 @@ import { getSemanticMarkup, removeSemanticMarkup, setSemanticRange } from '../ed
 const noPublications = []
 const labels = { tag: 'Тег', title: 'Название' }
 
-export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges, searchOccurrences = [], activeSearchId, publications = noPublications, highlightedPublicationId, onHighlightPublication, onRemovePublication, obstruction = null }) {
+export default function SemanticRail({ view, controller, active, writing, ready, metadataHost, scrollElement, tick, onActivate, report, allowChanges = true, allowRemoval = allowChanges, searchOccurrences = [], activeSearchId, publications = noPublications, highlightedPublicationId, onHighlightPublication, onRemovePublication, obstruction = null, visibleRange }) {
   const railRef = useRef(null)
   const [rail, setRail] = useState([])
   const state = controller?.state
@@ -26,6 +26,7 @@ export default function SemanticRail({ view, controller, active, writing, ready,
       const markup = getSemanticMarkup(view.state).sort((a, b) => a.anchor - b.anchor)
       const titles = new Map()
       for (const item of markup) {
+        if (visibleRange && (item.range ? item.range.from < visibleRange.from || item.range.to > visibleRange.to : item.anchor < visibleRange.from || item.anchor > visibleRange.to)) continue
         if (item.kind === 'title' && item.range) {
           // Structural-only legacy ranges have no canonical text range.
           // Keep their independent semantic label, without associating a marker.
@@ -48,6 +49,7 @@ export default function SemanticRail({ view, controller, active, writing, ready,
         // saved document, not the preedit preview. Never display stale positions.
         if (!view.state.doc.eq(parseDocument(archiveDocument(record)))) continue
         const range = attachedLiveRange(publication, record?.revision)
+        if (visibleRange && range && (range.from < visibleRange.from || range.to > visibleRange.to)) continue
         if (!range || range.from < 1 || range.from >= range.to || range.to >= view.state.doc.content.size) continue
         const key = `publication-range:${range.from}:${range.to}`
         const exactTitles = titles.get(`${range.from}:${range.to}`)
@@ -72,7 +74,7 @@ export default function SemanticRail({ view, controller, active, writing, ready,
     observer.observe(view.dom)
     observer.observe(metadataHost)
     return () => { scrollElement?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); observer.disconnect() }
-  }, [view, active, writing, metadataHost, scrollElement, tick, state, publications, record])
+  }, [view, active, writing, metadataHost, scrollElement, tick, state, publications, record, visibleRange])
   useLayoutEffect(() => {
     // Measure after wrapping, so a tall group cannot overlap the next one.
     const groups = [...(railRef.current?.querySelectorAll('.semantic-group') ?? [])]

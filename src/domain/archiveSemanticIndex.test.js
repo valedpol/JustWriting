@@ -39,7 +39,7 @@ test('unresolved slash items remain navigable at their stored anchor; invalid ma
 })
 
 
-test('selector defaults to first item, duplicate titles match all corresponding days, tag cards deduplicate assignments in archive order', () => {
+test('selector defaults to first item, titles select one exact dated assignment; tag cards deduplicate assignments in archive order', () => {
   const records = [record('one', '2026-10-01', [item('a', 'title', 'Ворона'), item('b', 'title', 'Ворона', 8, 12), item('c', 'tag', 'JW'), item('d', 'tag', 'JW', 8, 12)]),
     record('two', '2026-10-02', [item('e', 'title', 'Азбука'), item('f', 'tag', 'Редкий')]),
     record('three', '2026-10-03', [item('g', 'title', 'Ворона'), item('h', 'tag', 'JW')])]
@@ -48,8 +48,9 @@ test('selector defaults to first item, duplicate titles match all corresponding 
   for (const title of index.titles.filter(row => row.value === 'Ворона')) {
     const selected = archiveSemanticSelection(records, index, 'title', title.id)
     assert.equal(selected.selected, title.id)
-    assert.equal(selected.occurrences.length, 3)
-    assert.deepEqual(selected.records.map(row => row.textId), ['one', 'three'])
+    assert.equal(selected.occurrences.length, 1)
+    assert.equal(selected.occurrences[0].markupId, title.markupId)
+    assert.deepEqual(selected.records.map(row => row.textId), [title.textId])
   }
   const tags = archiveSemanticSelection(records, index, 'tag', null)
   assert.equal(tags.selected, 'JW')
